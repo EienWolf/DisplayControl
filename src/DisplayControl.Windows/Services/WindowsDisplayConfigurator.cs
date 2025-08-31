@@ -282,18 +282,32 @@ namespace DisplayControl.Windows.Services
             bool isGdi = !string.IsNullOrWhiteSpace(displayOrName) && displayOrName.StartsWith("\\\\.\\DISPLAY", System.StringComparison.OrdinalIgnoreCase);
             if (isGdi)
             {
+                // Buscar el source, independientemente de su estado, para saber si ya está deshabilitado
+                var srcAny = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase));
+                if (srcAny != null && (!srcAny.Active || !srcAny.ActiveTarget.HasValue))
+                    return Result.Ok("El monitor ya estaba deshabilitado");
+
+                // Si está activo, preparar datos para deshabilitar
                 var src = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase) && s.ActiveTarget.HasValue);
                 if (src != null && src.ActiveTarget is var at && at.HasValue)
-                {
                     match = (src.AdapterId, src.SourceId, at.Value.targetId);
-                }
             }
             else
             {
-                var tgt = _targetsByKey.Values.FirstOrDefault(t => t.Active && !string.IsNullOrWhiteSpace(t.Friendly) && t.Friendly!.Contains(displayOrName, System.StringComparison.OrdinalIgnoreCase));
-                if (tgt != null && tgt.ActiveSource is var asrc && asrc.HasValue)
+                // Si existe algún target que coincida y no está activo, no hay nada que hacer
+                var matchingTargets = _targetsByKey.Values
+                    .Where(t => !string.IsNullOrWhiteSpace(t.Friendly) && t.Friendly!.Contains(displayOrName, System.StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                var tgtActive = matchingTargets.FirstOrDefault(t => t.Active);
+                if (tgtActive == null)
                 {
-                    match = (tgt.AdapterId, asrc.Value.sourceId, tgt.TargetId);
+                    if (matchingTargets.Count > 0)
+                        return Result.Ok("El monitor ya estaba deshabilitado");
+                }
+                else if (tgtActive.ActiveSource is var asrc && asrc.HasValue)
+                {
+                    match = (tgtActive.AdapterId, asrc.Value.sourceId, tgtActive.TargetId);
                 }
             }
 

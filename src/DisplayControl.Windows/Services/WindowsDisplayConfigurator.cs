@@ -6,6 +6,8 @@ using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Helpers;
 using DisplayControl.Windows.Interop.User32;
 using DisplayControl.Windows.Interop.Shcore;
+using System.IO;
+using System.Text.Json;
 
 namespace DisplayControl.Windows.Services
 {
@@ -676,6 +678,79 @@ namespace DisplayControl.Windows.Services
             }
 
             return Result.Ok("Perfil aplicado");
+        }
+
+        public Result SetMonitors(DesiredProfile profile)
+        {
+            if (profile == null || profile.Monitors == null || profile.Monitors.Count == 0)
+                return Result.Fail("Perfil vacío o nulo");
+
+            // Validar que todos los monitores del perfil existen
+            var current = List();
+            var available = new HashSet<string>(current.Select(c => c.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(), StringComparer.OrdinalIgnoreCase);
+            var missing = profile.Monitors.Select(m => m.Name).Where(n => !available.Contains(n)).ToList();
+            if (missing.Count > 0)
+                return Result.Fail($"Monitores no encontrados en el sistema: {string.Join(", ", missing)}", available.ToList());
+
+            // 1) Asegurar que el primario del perfil esté activo y configurarlo como primario primero
+            if (!string.IsNullOrWhiteSpace(profile.PrimaryName))
+            {
+                var r1 = EnableMonitor(profile.PrimaryName);
+                if (!r1.Success) return r1;
+                var r2 = SetPrimary(profile.PrimaryName);
+                if (!r2.Success) return r2;
+            }
+
+            // 2) Encender/apagar basados en Enabled del perfil (mantener lógica existente)
+            var plan = profile.Monitors.Select(m => new DesiredMonitor(m.Name, m.Enabled)).ToList();
+            var r = SetMonitors((IEnumerable<DesiredMonitor>)plan);
+            if (!r.Success) return r;
+
+            // TODO: 3) Configurar resolución/posición/Hz/orientación/text scale con el menor número de llamadas
+            // Pendiente implementación integral
+
+            return Result.Ok($"Perfil '{profile.Name ?? "(sin nombre)"}' aplicado");
+        }
+
+        public Result SaveProfile(string? name = null)
+        {
+            var current = List();
+            if (current.Count == 0) return Result.Fail("No se pudieron obtener monitores");
+
+            string? primary = current.FirstOrDefault(c => c.IsActive && c.IsPrimary)?.FriendlyName;
+            var monitors = new List<DesiredMonitorConfig>(current.Count);
+            foreach (var d in current)
+            {
+                if (string.IsNullOrWhiteSpace(d.FriendlyName)) continue;
+                var a = d.Active;
+                monitors.Add(new DesiredMonitorConfig(
+                    d.FriendlyName!,
+                    d.IsActive,
+                    a?.PositionX ?? 0,
+                    a?.PositionY ?? 0,
+                    a?.Width ?? 0,
+                    a?.Height ?? 0,
+                    a?.ActiveRefreshHz ?? 0.0,
+                    a?.Orientation,
+                    a?.TextScalePercent
+                ));
+            }
+
+            var profile = new DesiredProfile(name ?? "current", primary, monitors);
+
+            try
+            {
+                string dir = Path.Combine(Environment.CurrentDirectory, "profiles");
+                Directory.CreateDirectory(dir);
+                string path = Path.Combine(dir, (name ?? "current") + ".json");
+                var json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(path, json);
+                return Result.Ok($"Perfil guardado en {path}");
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail($"No se pudo guardar el perfil: {ex.Message}");
+            }
         }
 
         public IReadOnlyList<DisplayInfo> List()

@@ -9,6 +9,8 @@ namespace DisplayControl.Abstractions
         Result DisableMonitor(string displayOrName);
         Result SetPrimary(string displayOrName);
         Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates);
+        Result SetMonitors(DesiredProfile profile);
+        Result SaveProfile(string? name = null);
         IReadOnlyList<DisplayInfo> List();
     }
 }

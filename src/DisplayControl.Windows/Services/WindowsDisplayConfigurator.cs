@@ -504,15 +504,20 @@ namespace DisplayControl.Windows.Services
                     .Select(d => d.Name),
                 StringComparer.OrdinalIgnoreCase);
 
-            // No permitir plan sin ningún monitor habilitado
-            var current0 = List();
-            var active0 = current0.Where(d => d.IsActive).Select(d => d.FriendlyName ?? "<sin nombre>").ToList();
-            if (desiredEnabled.Count == 0)
+            // Pre-validar que todos los deseados existen en el sistema (por nombre amigable)
+            var current = List();
+            var available = new HashSet<string>(
+                current.Select(d => d.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(),
+                StringComparer.OrdinalIgnoreCase);
+
+            var missing = desiredEnabled.Where(n => !available.Contains(n)).ToList();
+            if (missing.Count > 0)
             {
+                var opts = available.ToList();
                 return Result.Fail(
-                    "El plan no especifica ningún monitor habilitado; no se puede dejar el sistema sin monitores.",
-                    active0,
-                    "Elija al menos un monitor para mantener activo");
+                    $"No se encontraron los monitores solicitados: {string.Join(", ", missing)}.",
+                    opts,
+                    "Verifique el nombre y que el monitor esté conectado");
             }
 
             // 1) Habilitar los monitores deseados
@@ -525,23 +530,24 @@ namespace DisplayControl.Windows.Services
             // Estado tras habilitar
             var afterEnable = List();
 
-            // 2) Asegurar primario: si el actual primario no está en desiredEnabled, cambiarlo
-            var currentPrimary = afterEnable.FirstOrDefault(d => d.IsActive && d.IsPrimary);
-            bool needPrimaryChange = currentPrimary == null
-                                     || string.IsNullOrWhiteSpace(currentPrimary.FriendlyName)
-                                     || !desiredEnabled.Contains(currentPrimary.FriendlyName);
-            if (needPrimaryChange)
+            // 2) Asegurar primario sólo si hay monitores deseados
+            if (desiredEnabled.Count > 0)
             {
-                var targetPrimary = afterEnable.FirstOrDefault(d => d.IsActive &&
-                                                                    !string.IsNullOrWhiteSpace(d.FriendlyName) &&
-                                                                    desiredEnabled.Contains(d.FriendlyName!));
-                if (targetPrimary == null || string.IsNullOrWhiteSpace(targetPrimary.FriendlyName))
+                var currentPrimary = afterEnable.FirstOrDefault(d => d.IsActive && d.IsPrimary);
+                bool needPrimaryChange = currentPrimary == null
+                                         || string.IsNullOrWhiteSpace(currentPrimary.FriendlyName)
+                                         || !desiredEnabled.Contains(currentPrimary.FriendlyName);
+                if (needPrimaryChange)
                 {
-                    var opts = afterEnable.Where(d => d.IsActive).Select(d => d.FriendlyName ?? "<sin nombre>").ToList();
-                    return Result.Fail("No hay monitor activo elegible para primario.", opts, "Asegure que al menos uno esté activo");
+                    var targetPrimary = afterEnable.FirstOrDefault(d => d.IsActive &&
+                                                                        !string.IsNullOrWhiteSpace(d.FriendlyName) &&
+                                                                        desiredEnabled.Contains(d.FriendlyName!));
+                    if (targetPrimary != null && !string.IsNullOrWhiteSpace(targetPrimary.FriendlyName))
+                    {
+                        var rp = SetPrimary(targetPrimary.FriendlyName!);
+                        if (!rp.Success) return rp;
+                    }
                 }
-                var rp = SetPrimary(targetPrimary.FriendlyName!);
-                if (!rp.Success) return rp;
             }
 
             // 3) Deshabilitar los monitores activos que no están en desiredEnabled

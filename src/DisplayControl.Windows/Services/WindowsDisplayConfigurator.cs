@@ -5,6 +5,7 @@ using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Helpers;
 using DisplayControl.Windows.Interop.User32;
+using DisplayControl.Windows.Interop.Shcore;
 
 namespace DisplayControl.Windows.Services
 {

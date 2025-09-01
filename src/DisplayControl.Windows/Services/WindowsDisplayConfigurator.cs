@@ -5,6 +5,7 @@ using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Helpers;
 using DisplayControl.Windows.Interop.User32;
+using DisplayControl.Windows.Interop.Shcore;
 
 namespace DisplayControl.Windows.Services
 {
@@ -39,8 +40,18 @@ namespace DisplayControl.Windows.Services
             public (LUID adapter, uint sourceId)? ActiveSource; // si está activo, a qué source está asociado
             public HashSet<string> CandidateSources = new();    // keys de Source que lo pueden alimentar
             // Frecuencia
-            public double RefreshHz;
-            public bool HasRefresh;
+            public double ActiveRefreshHz;
+            public double DesktopRefreshHz;
+            public bool HasActiveRefresh;
+            // Orientación y escalado
+            public DISPLAYCONFIG_ROTATION Rotation;
+            public DISPLAYCONFIG_SCALING Scaling;
+            public bool HasTransform;
+            // Color avanzado / HDR
+            public bool? HdrSupported;
+            public bool? HdrEnabled;
+            public string? ColorEncoding;
+            public int? BitsPerColor;
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
@@ -51,6 +62,37 @@ namespace DisplayControl.Windows.Services
         private static string SKey(LUID a, uint sourceId) => $"{a.LowPart}:{a.HighPart}:{sourceId}";
         private static string TKey(LUID a, uint targetId) => $"{a.LowPart}:{a.HighPart}:{targetId}";
         private static bool SameAdapter(LUID a, LUID b) => a.LowPart == b.LowPart && a.HighPart == b.HighPart;
+
+        private static Dictionary<string, int> GetTextScaleByGdiName()
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT r, IntPtr data) =>
+                {
+                    var mi = new MONITORINFOEX { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
+                    if (User32Monitor.GetMonitorInfo(hMon, ref mi))
+                    {
+                        try
+                        {
+                            uint dx, dy;
+                            int hr = DisplayControl.Windows.Interop.Shcore.ShcoreMethods.GetDpiForMonitor(hMon, DisplayControl.Windows.Interop.Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
+                            if (hr == 0 && dx != 0)
+                            {
+                                int percent = (int)Math.Round(dx / 96.0 * 100.0);
+                                // mi.szDevice es del tipo \\.\\DISPLAYx
+                                result[mi.szDevice] = percent;
+                                
+                            }
+                        }
+                        catch { /* ignorar si SHCore no disponible */ }
+                    }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { /* ambientes sin API */ }
+            return result;
+        }
 
         // util para leer nombres
         private static string? GetSourceGdiName(LUID adapterId, uint sourceId)
@@ -168,12 +210,27 @@ namespace DisplayControl.Windows.Services
                     tInfo.Available |= targetAvail;
                 }
 
-                // Frecuencia desde path.targetInfo.refreshRate
+                // Frecuencia activa desde path.targetInfo.refreshRate
                 if (p.targetInfo.refreshRate.Denominator != 0)
                 {
-                    tInfo.RefreshHz = (double)p.targetInfo.refreshRate.Numerator / p.targetInfo.refreshRate.Denominator;
-                    tInfo.HasRefresh = true;
+                    tInfo.ActiveRefreshHz = (double)p.targetInfo.refreshRate.Numerator / p.targetInfo.refreshRate.Denominator;
+                    tInfo.HasActiveRefresh = true;
                 }
+
+                // Frecuencia de modo (desktop) si está disponible vía modeInfoIdx
+                if (p.targetInfo.modeInfoIdx != 0xFFFFFFFF)
+                {
+                    var mi = modes[p.targetInfo.modeInfoIdx];
+                    if (mi.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.TARGET && mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator != 0)
+                    {
+                        tInfo.DesktopRefreshHz = (double)mi.targetMode.targetVideoSignalInfo.vSyncFreq.Numerator / mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
+                    }
+                }
+
+                // Transformaciones
+                tInfo.Rotation = p.targetInfo.rotation;
+                tInfo.Scaling = p.targetInfo.scaling;
+                tInfo.HasTransform = true;
 
                 if (!tInfo.Active && !active && !sInfo.Active)
                     sInfo.CandidateTargets.Add(tKey);
@@ -184,6 +241,61 @@ namespace DisplayControl.Windows.Services
                 {
                     sInfo.ActiveTarget = (p.targetInfo.adapterId, p.targetInfo.id);
                     tInfo.ActiveSource = (p.sourceInfo.adapterId, p.sourceInfo.id);
+                }
+            }
+
+            // Consultar HDR y color avanzado por cada target disponible
+            foreach (var t in _targetsByKey.Values)
+            {
+                var adv = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
+                {
+                    header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_TARGET_ADVANCED_COLOR_INFO,
+                        size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>(),
+                        adapterId = t.AdapterId,
+                        id = t.TargetId
+                    }
+                };
+                int rc = User32DisplayConfig.DisplayConfigGetDeviceInfo(ref adv);
+                if (rc == 0)
+                {
+                    t.HdrSupported = adv.advancedColorSupported;
+                    t.HdrEnabled = adv.advancedColorEnabled;
+                    t.ColorEncoding = adv.colorEncoding.ToString();
+                    t.BitsPerColor = (int)adv.bitsPerColorChannel;
+                }
+            }
+
+            // Fallback/heurística: si no pudimos determinar HDR o bits por color, usar DEVMODE del source activo
+            foreach (var t in _targetsByKey.Values.Where(x => x.Active && x.ActiveSource.HasValue))
+            {
+                string sKey = SKey(t.ActiveSource!.Value.adapter, t.ActiveSource!.Value.sourceId);
+                if (_sourcesByKey.TryGetValue(sKey, out var s) && !string.IsNullOrWhiteSpace(s.GdiName))
+                {
+                    try
+                    {
+                        var dm = new DEVMODE();
+                        dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+                        if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
+                        {
+                            if (!t.BitsPerColor.HasValue && dm.dmBitsPerPel > 0)
+                            {
+                                int bpp = (int)dm.dmBitsPerPel;
+                                t.BitsPerColor = bpp == 30 ? 10 : bpp == 36 ? 12 : bpp >= 24 ? 8 : (int?)null;
+                            }
+                            // Si HDR no fue detectado por la API, asumir habilitado si hay >=10 bpc
+                            if (!t.HdrEnabled.HasValue || t.HdrEnabled == false)
+                            {
+                                if (t.BitsPerColor.HasValue && t.BitsPerColor.Value >= 10)
+                                {
+                                    t.HdrEnabled = true;
+                                    t.HdrSupported ??= true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
                 }
             }
         }
@@ -569,6 +681,7 @@ namespace DisplayControl.Windows.Services
         public IReadOnlyList<DisplayInfo> List()
         {
             FillData();
+            var textScale = GetTextScaleByGdiName();
             var result = new List<DisplayInfo>(_targetsByKey.Count);
             foreach (var t in _targetsByKey.Values.Where(t => t.Available))
             {
@@ -578,13 +691,64 @@ namespace DisplayControl.Windows.Services
                     if (_sourcesByKey.TryGetValue(sk, out var s))
                     {
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
+                        int? txtScale = null;
+                        if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
+                        // Obtener info de DEVMODE para frecuencia activa, profundidad de color y orientación
+                        int? devmodeHz = null;
+                        int? bpp = null;
+                        string? orientationStr = t.HasTransform ? t.Rotation.ToString() : null;
+                        if (!string.IsNullOrWhiteSpace(s.GdiName))
+                        {
+                            try
+                            {
+                                var dm = new DEVMODE();
+                                dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+                                if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, User32DisplaySettings.EDS_ROTATEDMODE))
+                                {
+                                    if (dm.dmDisplayFrequency > 0) devmodeHz = (int)dm.dmDisplayFrequency;
+                                    if (dm.dmBitsPerPel > 0) bpp = (int)dm.dmBitsPerPel;
+                                    orientationStr = dm.dmDisplayOrientation switch
+                                    {
+                                        1 => "Rotate90",
+                                        2 => "Rotate180",
+                                        3 => "Rotate270",
+                                        _ => "Identity"
+                                    };
+                                }
+                            }
+                            catch { }
+                        }
+
+                        // TODO: ActiveHz/DesktopHz son aproximaciones; pendiente implementación más precisa (DRR/VRR)
+                        double activeHzOut = t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0;
+                        if (devmodeHz.HasValue && devmodeHz.Value > 0)
+                            activeHzOut = devmodeHz.Value;
+
+                        int? bitsPerColor = t.BitsPerColor;
+                        if (!bitsPerColor.HasValue && bpp.HasValue)
+                        {
+                            bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
+                        }
+
+                        // TODO: AdaptiveRefreshHz pendiente de obtener desde APIs que expongan tasa instantánea
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
                             s.PosY,
                             s.Width,
                             s.Height,
-                            t.HasRefresh ? t.RefreshHz : 0.0
+                            activeHzOut,
+                            orientationStr,
+                            t.HasTransform ? t.Scaling.ToString() : null,
+                            txtScale,
+                            activeHzOut,
+                            t.DesktopRefreshHz,
+                            0.0,
+                            t.HdrSupported,
+                            t.HdrEnabled,
+                            t.ColorEncoding,
+                            bitsPerColor,
+                            null
                         );
                         result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
                         continue;

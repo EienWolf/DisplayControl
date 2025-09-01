@@ -23,6 +23,8 @@ namespace DisplayControl.Windows.Interop.User32
 
         [DllImport("user32.dll")]
         internal static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME requestPacket);
+
+        [DllImport("user32.dll")]
+        internal static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO requestPacket);
     }
 }
-

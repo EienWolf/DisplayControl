@@ -10,6 +10,7 @@ namespace DisplayControl.Windows.Interop.User32
         GET_TARGET_NAME = 2,
         GET_TARGET_PREFERRED_MODE = 3,
         GET_ADAPTER_NAME = 4,
+        GET_TARGET_ADVANCED_COLOR_INFO = 11,
     }
 
     internal enum DISPLAYCONFIG_MODE_INFO_TYPE : uint
@@ -24,8 +25,22 @@ namespace DisplayControl.Windows.Interop.User32
         Other = 0xFFFFFFFF
     }
 
-    internal enum DISPLAYCONFIG_ROTATION : uint { Identity = 1 }
-    internal enum DISPLAYCONFIG_SCALING : uint { Identity = 1 }
+    internal enum DISPLAYCONFIG_ROTATION : uint
+    {
+        Identity = 1,
+        Rotate90 = 2,
+        Rotate180 = 3,
+        Rotate270 = 4
+    }
+    internal enum DISPLAYCONFIG_SCALING : uint
+    {
+        Identity = 1,
+        Centered = 2,
+        Stretched = 3,
+        AspectRatioCenteredMax = 4,
+        Custom = 5,
+        Preferred = 128
+    }
     internal enum DISPLAYCONFIG_SCANLINE_ORDERING : uint { Unspecified = 0 }
     internal enum DISPLAYCONFIG_PIXELFORMAT : uint { PIXELFORMAT_32BPP = 5 }
 
@@ -175,5 +190,27 @@ namespace DisplayControl.Windows.Interop.User32
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string viewGdiDeviceName;
     }
-}
 
+    internal enum DISPLAYCONFIG_COLOR_ENCODING : uint
+    {
+        RGB = 0,
+        YCbCr444 = 1,
+        YCbCr422 = 2,
+        YCbCr420 = 3,
+        Intensity = 4
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        public uint value;
+        public DISPLAYCONFIG_COLOR_ENCODING colorEncoding;
+        public uint bitsPerColorChannel;
+
+        public bool advancedColorSupported => (value & 0x1) != 0;
+        public bool advancedColorEnabled => (value & 0x2) != 0;
+        public bool wideColorEnforced => (value & 0x4) != 0;
+        public bool advancedColorForceDisabled => (value & 0x8) != 0;
+    }
+}

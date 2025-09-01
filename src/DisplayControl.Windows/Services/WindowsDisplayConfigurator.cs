@@ -452,24 +452,29 @@ namespace DisplayControl.Windows.Services
                 bool esPrimario = srcInfo.HasMode && srcInfo.PosX == 0 && srcInfo.PosY == 0;
                 if (esPrimario)
                 {
-                    // Contar cuántos monitores activos están en (0,0). Si hay más de uno, permitir deshabilitar este.
-                    int primariosEnCero = _sourcesByKey.Values.Count(s => s.Active && s.HasMode && s.PosX == 0 && s.PosY == 0);
+                    // Contar cuántos TARGETS activos están en (0,0) (no SOURCES).
+                    // En escenarios de clonación, varios targets comparten un mismo source en (0,0).
+                    // Si hay más de un target activo en (0,0), permitir deshabilitar este.
+                    int primariosEnCero = _targetsByKey.Values.Count(t =>
+                        t.Active && t.ActiveSource.HasValue &&
+                        _sourcesByKey.TryGetValue(SKey(t.ActiveSource.Value.adapter, t.ActiveSource.Value.sourceId), out var ts) &&
+                        ts.HasMode && ts.PosX == 0 && ts.PosY == 0);
                     if (primariosEnCero > 1)
                     {
                         // Hay otro "primario" en (0,0), no bloqueamos
                     }
                     else
                     {
-                    // Sugerir usar setprimary y mostrar opciones (monitores activos) para reasignar primario
-                    var activeOpts = _targetsByKey.Values
-                        .Where(t => t.Active)
-                        .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
-                        .ToList();
-                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
-                    return Result.Fail(
-                        "No se puede deshabilitar el monitor primario. Cambie el primario primero con 'displayctl setprimary <opción>'." + opts,
-                        activeOpts,
-                        "Use 'displayctl setprimary <friendly>' para elegir el primario");
+                        // Sugerir usar setprimary y mostrar opciones (monitores activos) para reasignar primario
+                        var activeOpts = _targetsByKey.Values
+                            .Where(t => t.Active)
+                            .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
+                            .ToList();
+                        string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                        return Result.Fail(
+                            "No se puede deshabilitar el monitor primario. Cambie el primario primero con 'displayctl setprimary <opción>'." + opts,
+                            activeOpts,
+                            "Use 'displayctl setprimary <friendly>' para elegir el primario");
                     }
                 }
             }

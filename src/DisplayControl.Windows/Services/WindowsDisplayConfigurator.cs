@@ -39,8 +39,18 @@ namespace DisplayControl.Windows.Services
             public (LUID adapter, uint sourceId)? ActiveSource; // si está activo, a qué source está asociado
             public HashSet<string> CandidateSources = new();    // keys de Source que lo pueden alimentar
             // Frecuencia
-            public double RefreshHz;
-            public bool HasRefresh;
+            public double ActiveRefreshHz;
+            public double DesktopRefreshHz;
+            public bool HasActiveRefresh;
+            // Orientación y escalado
+            public DISPLAYCONFIG_ROTATION Rotation;
+            public DISPLAYCONFIG_SCALING Scaling;
+            public bool HasTransform;
+            // Color avanzado / HDR
+            public bool? HdrSupported;
+            public bool? HdrEnabled;
+            public string? ColorEncoding;
+            public int? BitsPerColor;
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
@@ -168,12 +178,27 @@ namespace DisplayControl.Windows.Services
                     tInfo.Available |= targetAvail;
                 }
 
-                // Frecuencia desde path.targetInfo.refreshRate
+                // Frecuencia activa desde path.targetInfo.refreshRate
                 if (p.targetInfo.refreshRate.Denominator != 0)
                 {
-                    tInfo.RefreshHz = (double)p.targetInfo.refreshRate.Numerator / p.targetInfo.refreshRate.Denominator;
-                    tInfo.HasRefresh = true;
+                    tInfo.ActiveRefreshHz = (double)p.targetInfo.refreshRate.Numerator / p.targetInfo.refreshRate.Denominator;
+                    tInfo.HasActiveRefresh = true;
                 }
+
+                // Frecuencia de modo (desktop) si está disponible vía modeInfoIdx
+                if (p.targetInfo.modeInfoIdx != 0xFFFFFFFF)
+                {
+                    var mi = modes[p.targetInfo.modeInfoIdx];
+                    if (mi.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.TARGET && mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator != 0)
+                    {
+                        tInfo.DesktopRefreshHz = (double)mi.targetMode.targetVideoSignalInfo.vSyncFreq.Numerator / mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
+                    }
+                }
+
+                // Transformaciones
+                tInfo.Rotation = p.targetInfo.rotation;
+                tInfo.Scaling = p.targetInfo.scaling;
+                tInfo.HasTransform = true;
 
                 if (!tInfo.Active && !active && !sInfo.Active)
                     sInfo.CandidateTargets.Add(tKey);
@@ -184,6 +209,29 @@ namespace DisplayControl.Windows.Services
                 {
                     sInfo.ActiveTarget = (p.targetInfo.adapterId, p.targetInfo.id);
                     tInfo.ActiveSource = (p.sourceInfo.adapterId, p.sourceInfo.id);
+                }
+            }
+
+            // Consultar HDR y color avanzado por cada target disponible
+            foreach (var t in _targetsByKey.Values)
+            {
+                var adv = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
+                {
+                    header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_TARGET_ADVANCED_COLOR_INFO,
+                        size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>(),
+                        adapterId = t.AdapterId,
+                        id = t.TargetId
+                    }
+                };
+                int rc = User32DisplayConfig.DisplayConfigGetDeviceInfo(ref adv);
+                if (rc == 0)
+                {
+                    t.HdrSupported = adv.advancedColorSupported;
+                    t.HdrEnabled = adv.advancedColorEnabled;
+                    t.ColorEncoding = adv.colorEncoding.ToString();
+                    t.BitsPerColor = (int)adv.bitsPerColorChannel;
                 }
             }
         }
@@ -584,7 +632,16 @@ namespace DisplayControl.Windows.Services
                             s.PosY,
                             s.Width,
                             s.Height,
-                            t.HasRefresh ? t.RefreshHz : 0.0
+                            t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
+                            t.HasTransform ? t.Rotation.ToString() : null,
+                            t.HasTransform ? t.Scaling.ToString() : null,
+                            t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
+                            t.DesktopRefreshHz,
+                            t.HdrSupported,
+                            t.HdrEnabled,
+                            t.ColorEncoding,
+                            t.BitsPerColor,
+                            null
                         );
                         result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
                         continue;

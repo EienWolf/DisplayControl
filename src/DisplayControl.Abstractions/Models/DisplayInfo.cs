@@ -13,6 +13,15 @@ namespace DisplayControl.Abstractions.Models
         int PositionY,
         uint Width,
         uint Height,
-        double RefreshHz
+        double RefreshHz,
+        string? Orientation,
+        string? Scaling,
+        double ActiveRefreshHz,
+        double DesktopRefreshHz,
+        bool? HdrSupported,
+        bool? HdrEnabled,
+        string? ColorEncoding,
+        int? BitsPerColor,
+        string? ColorSpace
     );
 }

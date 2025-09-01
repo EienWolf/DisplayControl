@@ -5,7 +5,6 @@ using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Helpers;
 using DisplayControl.Windows.Interop.User32;
-using DisplayControl.Windows.Interop.Shcore;
 
 namespace DisplayControl.Windows.Services
 {
@@ -68,7 +67,7 @@ namespace DisplayControl.Windows.Services
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMon, hdc, ref RECT r, IntPtr data) =>
+                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT r, IntPtr data) =>
                 {
                     var mi = new MONITORINFOEX { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
                     if (User32Monitor.GetMonitorInfo(hMon, ref mi))
@@ -76,11 +75,13 @@ namespace DisplayControl.Windows.Services
                         try
                         {
                             uint dx, dy;
-                            int hr = Shcore.ShcoreMethods.GetDpiForMonitor(hMon, Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
+                            int hr = DisplayControl.Windows.Interop.Shcore.ShcoreMethods.GetDpiForMonitor(hMon, DisplayControl.Windows.Interop.Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
                             if (hr == 0 && dx != 0)
                             {
                                 int percent = (int)Math.Round(dx / 96.0 * 100.0);
-                                // mi.szDevice es del tipo \\.\n+                                result[mi.szDevice] = percent;
+                                // mi.szDevice es del tipo \\.\\DISPLAYx
+                                result[mi.szDevice] = percent;
+                                
                             }
                         }
                         catch { /* ignorar si SHCore no disponible */ }

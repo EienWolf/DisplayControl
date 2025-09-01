@@ -494,7 +494,9 @@ namespace DisplayControl.Windows.Services
 
         public Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates)
         {
-            //Encender y apagar monitores según desiredStates
+            //Asegurarse de que esten habilitados los monitores deseados(EnableMonitor)
+            //Asgurarse de que uno de los monitores deaseados sea primario (SetPrimary)
+            //Deshabilitar los monitores no deseados (DisableMonitor)
             return Result.Fail("No implementado aún");
         }
 

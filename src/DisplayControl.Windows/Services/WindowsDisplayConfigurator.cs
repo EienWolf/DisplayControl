@@ -212,15 +212,19 @@ namespace DisplayControl.Windows.Services
             if (candidates.Count == 0)
             {
                 if (allCandidates.Count == 0)
+                {
                     return Result.Fail("No hay monitores disponibles; verifique conexión y encendido.");
-                string opts = string.Join(", ", allCandidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}"));
-                return Result.Fail($"No se encontró el monitor especificado. Opciones: {opts}");
+                }
+                var optsList = allCandidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                string opts = string.Join(", ", optsList);
+                return Result.Fail($"No se encontró el monitor especificado. Opciones: {opts}", optsList);
             }
 
             if (friendlyName == null && candidates.Count > 1)
             {
-                string opts = string.Join(", ", candidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}"));
-                return Result.Fail($"Hay varios monitores disponibles. Especifique el nombre. Opciones: {opts}");
+                var optsList = candidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                string opts = string.Join(", ", optsList);
+                return Result.Fail($"Hay varios monitores disponibles. Especifique el nombre. Opciones: {opts}", optsList);
             }
 
             TargetInfo target =
@@ -312,7 +316,15 @@ namespace DisplayControl.Windows.Services
             }
 
             if (match == null)
-                return Result.Fail("No se encontró un monitor activo que coincida");
+            {
+                // Ofrecer opciones: monitores activos (por friendly), ya que sólo se pueden deshabilitar activos
+                var activeOpts = _targetsByKey.Values
+                    .Where(t => t.Active)
+                    .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
+                    .ToList();
+                string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                return Result.Fail("No se encontró un monitor activo que coincida." + opts, activeOpts);
+            }
 
             // Validación: no permitir deshabilitar si es el único monitor activo
             int activos = _targetsByKey.Values.Count(t => t.Active);
@@ -325,7 +337,18 @@ namespace DisplayControl.Windows.Services
             {
                 bool esPrimario = srcInfo.HasMode && srcInfo.PosX == 0 && srcInfo.PosY == 0;
                 if (esPrimario)
-                    return Result.Fail("No se puede deshabilitar el monitor primario. Cambie el primario primero.");
+                {
+                    // Sugerir usar setprimary y mostrar opciones (monitores activos) para reasignar primario
+                    var activeOpts = _targetsByKey.Values
+                        .Where(t => t.Active)
+                        .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
+                        .ToList();
+                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                    return Result.Fail(
+                        "No se puede deshabilitar el monitor primario. Cambie el primario primero con 'displayctl setprimary <opción>'." + opts,
+                        activeOpts,
+                        "Use 'displayctl setprimary <friendly>' para elegir el primario");
+                }
             }
 
             // Construir configuración actual quitando la ruta activa seleccionada
@@ -373,9 +396,17 @@ namespace DisplayControl.Windows.Services
             {
                 targetSource = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase));
                 if (targetSource == null)
-                    return Result.Fail("No se encontró el display especificado");
+                {
+                    var activeOpts = _targetsByKey.Values.Where(t => t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                    return Result.Fail("No se encontró el display especificado." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
+                }
                 if (!targetSource.Active || !targetSource.ActiveTarget.HasValue)
-                    return Result.Fail("El monitor debe estar activo para ser primario");
+                {
+                    var inactiveOpts = _targetsByKey.Values.Where(t => !t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                    string opts = inactiveOpts.Count > 0 ? $" Puede activarlo con 'displayctl enable <friendly>'. Opciones: {string.Join(", ", inactiveOpts)}" : string.Empty;
+                    return Result.Fail("El monitor debe estar activo para ser primario." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
+                }
                 string tKey = TKey(targetSource.ActiveTarget.Value.adapter, targetSource.ActiveTarget.Value.targetId);
                 _targetsByKey.TryGetValue(tKey, out targetTarget);
             }
@@ -383,9 +414,17 @@ namespace DisplayControl.Windows.Services
             {
                 targetTarget = _targetsByKey.Values.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.Friendly) && t.Friendly!.Contains(displayOrName, StringComparison.OrdinalIgnoreCase));
                 if (targetTarget == null)
-                    return Result.Fail("No se encontró el monitor especificado");
+                {
+                    var activeOpts = _targetsByKey.Values.Where(t => t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                    return Result.Fail("No se encontró el monitor especificado." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
+                }
                 if (!targetTarget.Active || !targetTarget.ActiveSource.HasValue)
-                    return Result.Fail("El monitor debe estar activo para ser primario");
+                {
+                    var inactiveOpts = _targetsByKey.Values.Where(t => !t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
+                    string opts = inactiveOpts.Count > 0 ? $" Puede activarlo con 'displayctl enable <friendly>'. Opciones: {string.Join(", ", inactiveOpts)}" : string.Empty;
+                    return Result.Fail("El monitor debe estar activo para ser primario." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
+                }
                 string sKey = SKey(targetTarget.ActiveSource.Value.adapter, targetTarget.ActiveSource.Value.sourceId);
                 _sourcesByKey.TryGetValue(sKey, out targetSource);
             }

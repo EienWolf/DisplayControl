@@ -3,6 +3,7 @@ namespace DisplayControl.Abstractions.Models
     public record DisplayInfo(
         string? FriendlyName,
         bool IsActive,
+        bool IsPrimary,
         ActiveDetails? Active // null cuando no está activo
     );
 
@@ -15,4 +16,3 @@ namespace DisplayControl.Abstractions.Models
         double RefreshHz
     );
 }
-

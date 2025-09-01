@@ -346,6 +346,99 @@ namespace DisplayControl.Windows.Services
             return ok ? Result.Ok() : Result.Fail("SetDisplayConfig falló al deshabilitar");
         }
 
+        public Result SetPrimary(string displayOrName)
+        {
+            FillData();
+
+            // Resolver el monitor objetivo: por GDI (\\.\DISPLAYx) o por nombre amigable
+            SourceInfo? targetSource = null;
+            TargetInfo? targetTarget = null;
+
+            bool isGdi = !string.IsNullOrWhiteSpace(displayOrName) && displayOrName.StartsWith("\\\\.\\DISPLAY", StringComparison.OrdinalIgnoreCase);
+            if (isGdi)
+            {
+                targetSource = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase));
+                if (targetSource == null)
+                    return Result.Fail("No se encontró el display especificado");
+                if (!targetSource.Active || !targetSource.ActiveTarget.HasValue)
+                    return Result.Fail("El monitor debe estar activo para ser primario");
+                string tKey = TKey(targetSource.ActiveTarget.Value.adapter, targetSource.ActiveTarget.Value.targetId);
+                _targetsByKey.TryGetValue(tKey, out targetTarget);
+            }
+            else
+            {
+                targetTarget = _targetsByKey.Values.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.Friendly) && t.Friendly!.Contains(displayOrName, StringComparison.OrdinalIgnoreCase));
+                if (targetTarget == null)
+                    return Result.Fail("No se encontró el monitor especificado");
+                if (!targetTarget.Active || !targetTarget.ActiveSource.HasValue)
+                    return Result.Fail("El monitor debe estar activo para ser primario");
+                string sKey = SKey(targetTarget.ActiveSource.Value.adapter, targetTarget.ActiveSource.Value.sourceId);
+                _sourcesByKey.TryGetValue(sKey, out targetSource);
+            }
+
+            if (targetSource == null || targetTarget == null)
+                return Result.Fail("No se pudo resolver el monitor objetivo");
+
+            // Si ya es primario (posición 0,0), no hacer nada
+            if (targetSource.HasMode && targetSource.PosX == 0 && targetSource.PosY == 0)
+                return Result.Ok("El monitor ya era primario");
+
+            // Obtener configuración actual
+            if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
+                return Result.Fail("Error obteniendo tamaños de buffers");
+
+            var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+            var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
+            if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
+                return Result.Fail("Error obteniendo configuración actual");
+
+            // Identificar el modo "source" del target y del actual primario (pos 0,0)
+            int targetModeIndex = -1;
+            var targetAdapter = targetSource.AdapterId;
+            uint targetSourceId = targetSource.SourceId;
+            // Tomaremos la posición directamente desde "modes" para asegurar coherencia
+            int prevX = 0;
+            int prevY = 0;
+
+            for (int i = 0; i < modeCount; i++)
+            {
+                if (modes[i].infoType == DISPLAYCONFIG_MODE_INFO_TYPE.SOURCE)
+                {
+                    if (modes[i].adapterId.LowPart == targetAdapter.LowPart && modes[i].adapterId.HighPart == targetAdapter.HighPart && modes[i].id == targetSourceId)
+                    {
+                        targetModeIndex = i;
+                        prevX = modes[i].sourceMode.position.x;
+                        prevY = modes[i].sourceMode.position.y;
+                    }
+                }
+            }
+
+            if (targetModeIndex < 0)
+                return Result.Fail("No se encontró el modo del monitor destino");
+
+            // Calcular delta para preservar la estructura: desplazar todos los sources
+            // de forma que el monitor objetivo pase a (0,0) y el resto mantenga posiciones relativas.
+            int dx = -prevX;
+            int dy = -prevY;
+
+            for (int i = 0; i < modeCount; i++)
+            {
+                if (modes[i].infoType == DISPLAYCONFIG_MODE_INFO_TYPE.SOURCE)
+                {
+                    modes[i].sourceMode.position.x += dx;
+                    modes[i].sourceMode.position.y += dy;
+                }
+            }
+
+            // Mantener rutas activas como están
+            var activePaths = paths.Where(p => (p.flags & DISPLAYCONFIG_PATH_INFO_FLAGS.ACTIVE) != 0).ToArray();
+            var flags = SDC.USE_SUPPLIED_DISPLAY_CONFIG | SDC.APPLY | SDC.SAVE_TO_DATABASE | SDC.ALLOW_CHANGES;
+            int rc = User32DisplayConfig.SetDisplayConfig((uint)activePaths.Length, activePaths, (uint)modes.Length, modes, flags);
+            bool ok = rc == 0;
+            if (ok) FillData();
+            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig falló al establecer primario");
+        }
+
         public Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates)
         {
             //Encender y apagar monitores según desiredStates
@@ -363,6 +456,7 @@ namespace DisplayControl.Windows.Services
                     string sk = SKey(t.AdapterId, asrc.Value.sourceId);
                     if (_sourcesByKey.TryGetValue(sk, out var s))
                     {
+                        bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -371,11 +465,11 @@ namespace DisplayControl.Windows.Services
                             s.Height,
                             t.HasRefresh ? t.RefreshHz : 0.0
                         );
-                        result.Add(new DisplayInfo(t.Friendly, true, active));
+                        result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
                         continue;
                     }
                 }
-                result.Add(new DisplayInfo(t.Friendly, false, null));
+                result.Add(new DisplayInfo(t.Friendly, false, false, null));
             }
             return result;
         }

@@ -25,6 +25,8 @@ static class Cli
                     return RequireArg(args, 1, "enable <friendly>", out var name) ? DoEnable(dc, name!) : 2;
                 case "disable":
                     return RequireArg(args, 1, "disable <\\.\\DISPLAYx|friendly>", out var dname) ? DoDisable(dc, dname!) : 2;
+                case "setprimary":
+                    return RequireArg(args, 1, "setprimary <\\.\\DISPLAYx|friendly>", out var spname) ? DoSetPrimary(dc, spname!) : 2;
                 case "profile":
                     return RequireArg(args, 1, "profile <work|all|tv>", out var pname) ? DoProfile(dc, pname!) : 2;
                 default:
@@ -66,6 +68,13 @@ static class Cli
     static int DoDisable(IDisplayConfigurator dc, string name)
     {
         var r = dc.DisableMonitor(name);
+        Console.WriteLine(r.Success ? "OK" : $"FAIL: {r.Message}");
+        return r.Success ? 0 : 1;
+    }
+
+    static int DoSetPrimary(IDisplayConfigurator dc, string name)
+    {
+        var r = dc.SetPrimary(name);
         Console.WriteLine(r.Success ? "OK" : $"FAIL: {r.Message}");
         return r.Success ? 0 : 1;
     }
@@ -132,6 +141,7 @@ static class Cli
         Console.WriteLine("  displayctl list");
         Console.WriteLine("  displayctl enable <friendly>");
         Console.WriteLine("  displayctl disable <\\.\\DISPLAYx|friendly>");
+        Console.WriteLine("  displayctl setprimary <\\.\\DISPLAYx|friendly>");
         Console.WriteLine("  displayctl profile <work|all|tv>");
         return 2;
     }

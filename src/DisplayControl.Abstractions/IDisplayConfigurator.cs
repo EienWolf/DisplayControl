@@ -7,6 +7,7 @@ namespace DisplayControl.Abstractions
     {
         Result EnableMonitor(string? friendlyName = null);
         Result DisableMonitor(string displayOrName);
+        Result SetPrimary(string displayOrName);
         Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates);
         IReadOnlyList<DisplayInfo> List();
     }

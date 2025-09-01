@@ -494,10 +494,70 @@ namespace DisplayControl.Windows.Services
 
         public Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates)
         {
-            //Asegurarse de que esten habilitados los monitores deseados(EnableMonitor)
-            //Asgurarse de que uno de los monitores deaseados sea primario (SetPrimary)
-            //Deshabilitar los monitores no deseados (DisableMonitor)
-            return Result.Fail("No implementado aún");
+            if (desiredStates == null)
+                return Result.Fail("Parámetro 'desiredStates' es nulo");
+
+            // Conjunto de nombres deseados habilitados
+            var desiredEnabled = new HashSet<string>(
+                desiredStates
+                    .Where(d => d.Enabled && !string.IsNullOrWhiteSpace(d.Name))
+                    .Select(d => d.Name),
+                StringComparer.OrdinalIgnoreCase);
+
+            // No permitir plan sin ningún monitor habilitado
+            var current0 = List();
+            var active0 = current0.Where(d => d.IsActive).Select(d => d.FriendlyName ?? "<sin nombre>").ToList();
+            if (desiredEnabled.Count == 0)
+            {
+                return Result.Fail(
+                    "El plan no especifica ningún monitor habilitado; no se puede dejar el sistema sin monitores.",
+                    active0,
+                    "Elija al menos un monitor para mantener activo");
+            }
+
+            // 1) Habilitar los monitores deseados
+            foreach (var name in desiredEnabled)
+            {
+                var r = EnableMonitor(name);
+                if (!r.Success) return r;
+            }
+
+            // Estado tras habilitar
+            var afterEnable = List();
+
+            // 2) Asegurar primario: si el actual primario no está en desiredEnabled, cambiarlo
+            var currentPrimary = afterEnable.FirstOrDefault(d => d.IsActive && d.IsPrimary);
+            bool needPrimaryChange = currentPrimary == null
+                                     || string.IsNullOrWhiteSpace(currentPrimary.FriendlyName)
+                                     || !desiredEnabled.Contains(currentPrimary.FriendlyName);
+            if (needPrimaryChange)
+            {
+                var targetPrimary = afterEnable.FirstOrDefault(d => d.IsActive &&
+                                                                    !string.IsNullOrWhiteSpace(d.FriendlyName) &&
+                                                                    desiredEnabled.Contains(d.FriendlyName!));
+                if (targetPrimary == null || string.IsNullOrWhiteSpace(targetPrimary.FriendlyName))
+                {
+                    var opts = afterEnable.Where(d => d.IsActive).Select(d => d.FriendlyName ?? "<sin nombre>").ToList();
+                    return Result.Fail("No hay monitor activo elegible para primario.", opts, "Asegure que al menos uno esté activo");
+                }
+                var rp = SetPrimary(targetPrimary.FriendlyName!);
+                if (!rp.Success) return rp;
+            }
+
+            // 3) Deshabilitar los monitores activos que no están en desiredEnabled
+            var afterPrimary = List();
+            var toDisable = afterPrimary.Where(d => d.IsActive && (string.IsNullOrWhiteSpace(d.FriendlyName) || !desiredEnabled.Contains(d.FriendlyName!)))
+                                        .ToList();
+            foreach (var d in toDisable)
+            {
+                // Usar friendly si existe; si no, caer a GDI
+                var key = d.FriendlyName ?? d.Active?.GdiName;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                var rd = DisableMonitor(key!);
+                if (!rd.Success) return rd;
+            }
+
+            return Result.Ok("Perfil aplicado");
         }
 
         public IReadOnlyList<DisplayInfo> List()

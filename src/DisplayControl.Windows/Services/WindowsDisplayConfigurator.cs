@@ -706,10 +706,98 @@ namespace DisplayControl.Windows.Services
             var r = SetMonitors((IEnumerable<DesiredMonitor>)plan);
             if (!r.Success) return r;
 
-            // TODO: 3) Configurar resolución/posición/Hz/orientación/text scale con el menor número de llamadas
-            // Pendiente implementación integral
+            // 3) Configurar resolución/posición/Hz/orientación con el menor número de llamadas (ChangeDisplaySettingsEx + apply global)
+            var r3 = ApplyDisplaySettings(profile);
+            if (!r3.Success) return r3;
 
             return Result.Ok($"Perfil '{profile.Name ?? "(sin nombre)"}' aplicado");
+        }
+
+        private static uint MapOrientationToDm(string? orientation)
+            => (orientation ?? string.Empty).ToLowerInvariant() switch
+            {
+                "rotate90" => 1u,
+                "rotate180" => 2u,
+                "rotate270" => 3u,
+                _ => 0u // Identity
+            };
+
+        private Result ApplyDisplaySettings(DesiredProfile profile)
+        {
+            // Estrategia: para cada monitor Enabled del perfil, preparamos un DEVMODE con los campos relevantes
+            // y llamamos ChangeDisplaySettingsEx con CDS_UPDATEREGISTRY|CDS_NORESET; al final, un apply global.
+            foreach (var m in profile.Monitors.Where(m => m.Enabled))
+            {
+                // Resolver GDI name (\\.\DISPLAYx) por friendly
+                var gdi = ResolveGdiByFriendly(m.Name);
+                if (string.IsNullOrWhiteSpace(gdi))
+                    return Result.Fail($"No se pudo resolver el dispositivo GDI para '{m.Name}'");
+
+                var dm = new DEVMODE();
+                dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+
+                uint fields = 0;
+                // Posición (no aplicar al primario; Windows ignora o usa 0,0 para primario)
+                bool isPrimary = !string.IsNullOrWhiteSpace(profile.PrimaryName) &&
+                                 string.Equals(profile.PrimaryName, m.Name, StringComparison.OrdinalIgnoreCase);
+                if (!isPrimary)
+                {
+                    dm.dmPositionX = m.PositionX;
+                    dm.dmPositionY = m.PositionY;
+                    fields |= User32DisplaySettings.DM_POSITION;
+                }
+
+                if (m.Width > 0 && m.Height > 0)
+                {
+                    dm.dmPelsWidth = m.Width;
+                    dm.dmPelsHeight = m.Height;
+                    fields |= User32DisplaySettings.DM_PELSWIDTH | User32DisplaySettings.DM_PELSHEIGHT;
+                }
+
+                if (m.DesiredRefreshHz > 0)
+                {
+                    dm.dmDisplayFrequency = (uint)Math.Round(m.DesiredRefreshHz);
+                    fields |= User32DisplaySettings.DM_DISPLAYFREQUENCY;
+                }
+
+                if (!string.IsNullOrWhiteSpace(m.Orientation))
+                {
+                    dm.dmDisplayOrientation = MapOrientationToDm(m.Orientation);
+                    fields |= User32DisplaySettings.DM_DISPLAYORIENTATION;
+                }
+
+                dm.dmFields = fields;
+
+                if (fields != 0)
+                {
+                    int rc = User32DisplaySettings.ChangeDisplaySettingsEx(gdi!, ref dm, IntPtr.Zero,
+                        User32DisplaySettings.CDS_UPDATEREGISTRY | User32DisplaySettings.CDS_NORESET, IntPtr.Zero);
+                    if (rc != User32DisplaySettings.DISP_CHANGE_SUCCESSFUL)
+                        return Result.Fail($"Falló al preparar ajustes para '{m.Name}' (rc={rc})");
+                }
+            }
+
+            // Apply global
+            int rcApply = User32DisplaySettings.ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+            if (rcApply != User32DisplaySettings.DISP_CHANGE_SUCCESSFUL)
+                return Result.Fail($"Falló al aplicar ajustes (rc={rcApply})");
+
+            // Refrescar índices
+            FillData();
+            return Result.Ok();
+        }
+
+        private string? ResolveGdiByFriendly(string friendly)
+        {
+            FillData();
+            var tgt = _targetsByKey.Values.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.Friendly) &&
+                                                               t.Friendly!.Equals(friendly, StringComparison.OrdinalIgnoreCase) &&
+                                                               t.ActiveSource.HasValue);
+            if (tgt == null) return null;
+            string sKey = SKey(tgt.ActiveSource!.Value.adapter, tgt.ActiveSource!.Value.sourceId);
+            if (_sourcesByKey.TryGetValue(sKey, out var s) && !string.IsNullOrWhiteSpace(s.GdiName))
+                return s.GdiName;
+            return null;
         }
 
         public Result SaveProfile(string? name = null)

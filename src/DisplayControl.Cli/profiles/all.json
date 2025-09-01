@@ -1,0 +1,39 @@
+{
+  "Name": "all",
+  "PrimaryName": "PA278CGV",
+  "Monitors": [
+    {
+      "Name": "LG TV SSCR2",
+      "Enabled": true,
+      "PositionX": 2560,
+      "PositionY": 0,
+      "Width": 3840,
+      "Height": 2160,
+      "DesiredRefreshHz": 120,
+      "Orientation": "Identity",
+      "TextScalePercent": 300
+    },
+    {
+      "Name": "Kamvas 22",
+      "Enabled": true,
+      "PositionX": -1920,
+      "PositionY": 915,
+      "Width": 1920,
+      "Height": 1080,
+      "DesiredRefreshHz": 59,
+      "Orientation": "Identity",
+      "TextScalePercent": 100
+    },
+    {
+      "Name": "PA278CGV",
+      "Enabled": true,
+      "PositionX": 0,
+      "PositionY": 0,
+      "Width": 2560,
+      "Height": 1440,
+      "DesiredRefreshHz": 144,
+      "Orientation": "Identity",
+      "TextScalePercent": 100
+    }
+  ]
+}

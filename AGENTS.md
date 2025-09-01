@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+IMPORTANT: Language Policy
+- Effective immediately, all new code, documentation, filenames, identifiers, and configuration must be written in English. Prefer clear, descriptive English names for variables, methods, types, and files. Update legacy Spanish identifiers opportunistically when touching related code.
+
 ## Project Structure & Modules
 - `ConsoleApp.sln`: Solution entry.
 - `src/DisplayControl.Abstractions`: Interfaces and models (e.g., `IDisplayConfigurator`, `DisplayInfo`).
@@ -22,6 +25,9 @@
 - Data: Prefer `record` for immutable DTOs under `Models/`.
 - Formatting: Run `dotnet format` prior to PRs.
 
+Internationalization & English Only
+- Public strings (messages, CLI help) should be English by default. If localization is needed, introduce resource files; do not hardcode mixed languages.
+
 ## Testing Guidelines
 - Framework: xUnit recommended; tests under `tests/DisplayControl.*.Tests`.
 - Naming: `ClassUnderTest_Method_ExpectedBehavior` (e.g., `WindowsDisplayConfigurator_List_ReturnsActive`).
@@ -38,4 +44,3 @@
 - Platform: Windows-only APIs; develop/run on Windows 10/11.
 - Permissions: Display reconfiguration can blank screens briefly—avoid during screen-sharing.
 - Config: No secrets required. If adding settings, prefer `appsettings.Development.json` with documented defaults.
-

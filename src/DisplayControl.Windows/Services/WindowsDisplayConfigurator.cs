@@ -266,6 +266,38 @@ namespace DisplayControl.Windows.Services
                     t.BitsPerColor = (int)adv.bitsPerColorChannel;
                 }
             }
+
+            // Fallback/heurística: si no pudimos determinar HDR o bits por color, usar DEVMODE del source activo
+            foreach (var t in _targetsByKey.Values.Where(x => x.Active && x.ActiveSource.HasValue))
+            {
+                string sKey = SKey(t.ActiveSource!.Value.adapter, t.ActiveSource!.Value.sourceId);
+                if (_sourcesByKey.TryGetValue(sKey, out var s) && !string.IsNullOrWhiteSpace(s.GdiName))
+                {
+                    try
+                    {
+                        var dm = new DEVMODE();
+                        dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+                        if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
+                        {
+                            if (!t.BitsPerColor.HasValue && dm.dmBitsPerPel > 0)
+                            {
+                                int bpp = (int)dm.dmBitsPerPel;
+                                t.BitsPerColor = bpp == 30 ? 10 : bpp == 36 ? 12 : bpp >= 24 ? 8 : (int?)null;
+                            }
+                            // Si HDR no fue detectado por la API, asumir habilitado si hay >=10 bpc
+                            if (!t.HdrEnabled.HasValue || t.HdrEnabled == false)
+                            {
+                                if (t.BitsPerColor.HasValue && t.BitsPerColor.Value >= 10)
+                                {
+                                    t.HdrEnabled = true;
+                                    t.HdrSupported ??= true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
         }
 
         public Result EnableMonitor(string? friendlyName = null)
@@ -661,19 +693,27 @@ namespace DisplayControl.Windows.Services
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
                         int? txtScale = null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
-                        // Obtener info de DEVMODE para frecuencia activa y profundidad de color
+                        // Obtener info de DEVMODE para frecuencia activa, profundidad de color y orientación
                         int? devmodeHz = null;
                         int? bpp = null;
+                        string? orientationStr = t.HasTransform ? t.Rotation.ToString() : null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName))
                         {
                             try
                             {
                                 var dm = new DEVMODE();
                                 dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
-                                if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
+                                if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, User32DisplaySettings.EDS_ROTATEDMODE))
                                 {
                                     if (dm.dmDisplayFrequency > 0) devmodeHz = (int)dm.dmDisplayFrequency;
                                     if (dm.dmBitsPerPel > 0) bpp = (int)dm.dmBitsPerPel;
+                                    orientationStr = dm.dmDisplayOrientation switch
+                                    {
+                                        1 => "Rotate90",
+                                        2 => "Rotate180",
+                                        3 => "Rotate270",
+                                        _ => "Identity"
+                                    };
                                 }
                             }
                             catch { }
@@ -696,7 +736,7 @@ namespace DisplayControl.Windows.Services
                             s.Width,
                             s.Height,
                             activeHzOut,
-                            t.HasTransform ? t.Rotation.ToString() : null,
+                            orientationStr,
                             t.HasTransform ? t.Scaling.ToString() : null,
                             txtScale,
                             activeHzOut,

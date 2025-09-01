@@ -4,11 +4,13 @@ using System.Linq;
 using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Services;
+using System.Runtime.InteropServices;
 
 static class Cli
 {
     static int Main(string[] args)
     {
+        TryEnablePerMonitorDpiAwareness();
         IDisplayConfigurator dc = new WindowsDisplayConfigurator();
         if (args.Length == 0)
         {
@@ -40,6 +42,26 @@ static class Cli
             return 1;
         }
     }
+
+    static void TryEnablePerMonitorDpiAwareness()
+    {
+        try
+        {
+            // Try Per-Monitor V2 (Windows 10+)
+            if (!SetProcessDpiAwarenessContext(new IntPtr(-4))) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            {
+                // Fallback to Per-Monitor V1
+                SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+            }
+        }
+        catch { /* ignore */ }
+    }
+
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+    [DllImport("Shcore.dll")]
+    static extern int SetProcessDpiAwareness(int value);
 
     static int DoList(IDisplayConfigurator dc, string[] flags)
     {

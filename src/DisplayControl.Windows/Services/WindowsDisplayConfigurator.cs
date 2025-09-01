@@ -5,6 +5,7 @@ using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Helpers;
 using DisplayControl.Windows.Interop.User32;
+using DisplayControl.Windows.Interop.Shcore;
 
 namespace DisplayControl.Windows.Services
 {
@@ -660,22 +661,50 @@ namespace DisplayControl.Windows.Services
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
                         int? txtScale = null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
+                        // Obtener info de DEVMODE para frecuencia activa y profundidad de color
+                        int? devmodeHz = null;
+                        int? bpp = null;
+                        if (!string.IsNullOrWhiteSpace(s.GdiName))
+                        {
+                            try
+                            {
+                                var dm = new DEVMODE();
+                                dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+                                if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
+                                {
+                                    if (dm.dmDisplayFrequency > 0) devmodeHz = (int)dm.dmDisplayFrequency;
+                                    if (dm.dmBitsPerPel > 0) bpp = (int)dm.dmBitsPerPel;
+                                }
+                            }
+                            catch { }
+                        }
+
+                        double activeHzOut = t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0;
+                        if (devmodeHz.HasValue && devmodeHz.Value > 0)
+                            activeHzOut = devmodeHz.Value;
+
+                        int? bitsPerColor = t.BitsPerColor;
+                        if (!bitsPerColor.HasValue && bpp.HasValue)
+                        {
+                            bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
+                        }
+
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
                             s.PosY,
                             s.Width,
                             s.Height,
-                            t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
+                            activeHzOut,
                             t.HasTransform ? t.Rotation.ToString() : null,
                             t.HasTransform ? t.Scaling.ToString() : null,
                             txtScale,
-                            t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
+                            activeHzOut,
                             t.DesktopRefreshHz,
                             t.HdrSupported,
                             t.HdrEnabled,
                             t.ColorEncoding,
-                            t.BitsPerColor,
+                            bitsPerColor,
                             null
                         );
                         result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));

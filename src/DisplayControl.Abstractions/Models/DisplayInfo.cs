@@ -16,6 +16,7 @@ namespace DisplayControl.Abstractions.Models
         double RefreshHz,
         string? Orientation,
         string? Scaling,
+        int? TextScalePercent,
         double ActiveRefreshHz,
         double DesktopRefreshHz,
         bool? HdrSupported,

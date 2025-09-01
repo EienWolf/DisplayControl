@@ -20,7 +20,7 @@ static class Cli
             switch (args[0].ToLowerInvariant())
             {
                 case "list":
-                    return DoList(dc);
+                    return DoList(dc, args.Skip(1).ToArray());
                 case "enable":
                     return RequireArg(args, 1, "enable <friendly>", out var name) ? DoEnable(dc, name!) : 2;
                 case "disable":
@@ -41,14 +41,25 @@ static class Cli
         }
     }
 
-    static int DoList(IDisplayConfigurator dc)
+    static int DoList(IDisplayConfigurator dc, string[] flags)
     {
+        bool details = flags.Any(f => string.Equals(f, "--details", StringComparison.OrdinalIgnoreCase) || string.Equals(f, "-d", StringComparison.OrdinalIgnoreCase) || string.Equals(f, "-v", StringComparison.OrdinalIgnoreCase));
         var list = dc.List();
         foreach (var d in list)
         {
             if (d.IsActive && d.Active is var a && a != null)
             {
-                Console.WriteLine($"- {d.FriendlyName ?? "<sin nombre>"} | ACTIVO | {a.GdiName} | Pos {a.PositionX},{a.PositionY} | {a.Width}x{a.Height} | {a.RefreshHz:F1} Hz");
+                Console.WriteLine($"- {d.FriendlyName ?? "<sin nombre>"} | ACTIVO | {a.GdiName} | Pos {a.PositionX},{a.PositionY} | {a.Width}x{a.Height} | {a.RefreshHz:F1} Hz{(d.IsPrimary ? " | PRIMARY" : string.Empty)}");
+                if (details)
+                {
+                    Console.WriteLine($"    Orientation: {a.Orientation ?? "-"}");
+                    Console.WriteLine($"    ScalingMode: {a.Scaling ?? "-"}");
+                    Console.WriteLine($"    TextScale: {(a.TextScalePercent.HasValue ? a.TextScalePercent + "%" : "-")}");
+                    Console.WriteLine($"    ActiveHz: {(a.ActiveRefreshHz > 0 ? a.ActiveRefreshHz.ToString("F1") : "-")}");
+                    Console.WriteLine($"    DesktopHz: {(a.DesktopRefreshHz > 0 ? a.DesktopRefreshHz.ToString("F1") : "-")}");
+                    Console.WriteLine($"    HDR: {(a.HdrSupported == true ? (a.HdrEnabled == true ? "Enabled" : "Supported") : "No")}");
+                    Console.WriteLine($"    Color: {(a.ColorEncoding ?? "-")}, {(a.BitsPerColor?.ToString() ?? "-")} bpc");
+                }
             }
             else
             {
@@ -138,7 +149,7 @@ static class Cli
     static int PrintHelp()
     {
         Console.WriteLine("Uso:");
-        Console.WriteLine("  displayctl list");
+        Console.WriteLine("  displayctl list [--details|-d|-v]");
         Console.WriteLine("  displayctl enable <friendly>");
         Console.WriteLine("  displayctl disable <\\.\\DISPLAYx|friendly>");
         Console.WriteLine("  displayctl setprimary <\\.\\DISPLAYx|friendly>");

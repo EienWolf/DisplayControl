@@ -62,6 +62,35 @@ namespace DisplayControl.Windows.Services
         private static string TKey(LUID a, uint targetId) => $"{a.LowPart}:{a.HighPart}:{targetId}";
         private static bool SameAdapter(LUID a, LUID b) => a.LowPart == b.LowPart && a.HighPart == b.HighPart;
 
+        private static Dictionary<string, int> GetTextScaleByGdiName()
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMon, hdc, ref RECT r, IntPtr data) =>
+                {
+                    var mi = new MONITORINFOEX { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
+                    if (User32Monitor.GetMonitorInfo(hMon, ref mi))
+                    {
+                        try
+                        {
+                            uint dx, dy;
+                            int hr = Shcore.ShcoreMethods.GetDpiForMonitor(hMon, Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
+                            if (hr == 0 && dx != 0)
+                            {
+                                int percent = (int)Math.Round(dx / 96.0 * 100.0);
+                                // mi.szDevice es del tipo \\.\n+                                result[mi.szDevice] = percent;
+                            }
+                        }
+                        catch { /* ignorar si SHCore no disponible */ }
+                    }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { /* ambientes sin API */ }
+            return result;
+        }
+
         // util para leer nombres
         private static string? GetSourceGdiName(LUID adapterId, uint sourceId)
         {
@@ -617,6 +646,7 @@ namespace DisplayControl.Windows.Services
         public IReadOnlyList<DisplayInfo> List()
         {
             FillData();
+            var textScale = GetTextScaleByGdiName();
             var result = new List<DisplayInfo>(_targetsByKey.Count);
             foreach (var t in _targetsByKey.Values.Where(t => t.Available))
             {
@@ -626,6 +656,8 @@ namespace DisplayControl.Windows.Services
                     if (_sourcesByKey.TryGetValue(sk, out var s))
                     {
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
+                        int? txtScale = null;
+                        if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -635,6 +667,7 @@ namespace DisplayControl.Windows.Services
                             t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
                             t.HasTransform ? t.Rotation.ToString() : null,
                             t.HasTransform ? t.Scaling.ToString() : null,
+                            txtScale,
                             t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0,
                             t.DesktopRefreshHz,
                             t.HdrSupported,

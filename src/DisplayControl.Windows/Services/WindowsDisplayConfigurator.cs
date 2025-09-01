@@ -445,13 +445,21 @@ namespace DisplayControl.Windows.Services
             if (activos <= 1)
                 return Result.Fail("No se puede deshabilitar el único monitor activo");
 
-            // Validación: no permitir deshabilitar si es el monitor primario (posición 0,0)
+            // Validación: no permitir deshabilitar si es el único monitor "primario" (posición 0,0)
             string sKey = SKey(match.Value.adapter, match.Value.sourceId);
             if (_sourcesByKey.TryGetValue(sKey, out var srcInfo))
             {
                 bool esPrimario = srcInfo.HasMode && srcInfo.PosX == 0 && srcInfo.PosY == 0;
                 if (esPrimario)
                 {
+                    // Contar cuántos monitores activos están en (0,0). Si hay más de uno, permitir deshabilitar este.
+                    int primariosEnCero = _sourcesByKey.Values.Count(s => s.Active && s.HasMode && s.PosX == 0 && s.PosY == 0);
+                    if (primariosEnCero > 1)
+                    {
+                        // Hay otro "primario" en (0,0), no bloqueamos
+                    }
+                    else
+                    {
                     // Sugerir usar setprimary y mostrar opciones (monitores activos) para reasignar primario
                     var activeOpts = _targetsByKey.Values
                         .Where(t => t.Active)
@@ -462,6 +470,7 @@ namespace DisplayControl.Windows.Services
                         "No se puede deshabilitar el monitor primario. Cambie el primario primero con 'displayctl setprimary <opción>'." + opts,
                         activeOpts,
                         "Use 'displayctl setprimary <friendly>' para elegir el primario");
+                    }
                 }
             }
 

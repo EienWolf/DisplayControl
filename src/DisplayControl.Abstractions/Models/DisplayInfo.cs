@@ -19,6 +19,9 @@ namespace DisplayControl.Abstractions.Models
         int? TextScalePercent,
         double ActiveRefreshHz,
         double DesktopRefreshHz,
+        // TODO: AdaptiveRefreshHz pendiente de implementación correcta (DRR/VRR)
+        double AdaptiveRefreshHz,
+        // TODO: HDR/Color pendiente de implementación robusta. Valores actuales pueden ser heurísticos.
         bool? HdrSupported,
         bool? HdrEnabled,
         string? ColorEncoding,

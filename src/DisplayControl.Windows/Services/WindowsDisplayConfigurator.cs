@@ -719,6 +719,7 @@ namespace DisplayControl.Windows.Services
                             catch { }
                         }
 
+                        // TODO: ActiveHz/DesktopHz son aproximaciones; pendiente implementación más precisa (DRR/VRR)
                         double activeHzOut = t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0;
                         if (devmodeHz.HasValue && devmodeHz.Value > 0)
                             activeHzOut = devmodeHz.Value;
@@ -729,6 +730,7 @@ namespace DisplayControl.Windows.Services
                             bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
                         }
 
+                        // TODO: AdaptiveRefreshHz pendiente de obtener desde APIs que expongan tasa instantánea
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -741,6 +743,7 @@ namespace DisplayControl.Windows.Services
                             txtScale,
                             activeHzOut,
                             t.DesktopRefreshHz,
+                            0.0,
                             t.HdrSupported,
                             t.HdrEnabled,
                             t.ColorEncoding,

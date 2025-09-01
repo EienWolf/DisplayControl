@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Text.Json;
 using DisplayControl.Abstractions;
 using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Services;
@@ -30,7 +32,9 @@ static class Cli
                 case "setprimary":
                     return RequireArg(args, 1, "setprimary <\\.\\DISPLAYx|friendly>", out var spname) ? DoSetPrimary(dc, spname!) : 2;
                 case "profile":
-                    return RequireArg(args, 1, "profile <work|all|tv>", out var pname) ? DoProfile(dc, pname!) : 2;
+                    return RequireArg(args, 1, "profile <name>", out var pname) ? DoProfile(dc, pname!) : 2;
+                case "saveprofile":
+                    return DoSaveProfile(dc, args.Length > 1 ? args[1] : null);
                 default:
                     Console.Error.WriteLine("Comando no reconocido.");
                     return PrintHelp();
@@ -115,10 +119,16 @@ static class Cli
 
     static int DoProfile(IDisplayConfigurator dc, string profileName)
     {
-        // Perfiles solicitados:
-        // work: PA278CGV + Kamvas 22 (apagar LG TV SSCR2)
-        // all: los 3 encendidos
-        // tv: solo LG TV SSCR2
+        // Buscar un archivo de perfil JSON
+        var (found, profile) = TryLoadProfile(profileName);
+        if (found && profile != null)
+        {
+            var res = dc.SetMonitors(profile);
+            Console.WriteLine(res.Success ? $"Perfil '{profileName}' aplicado." : $"FAIL: {res.Message}");
+            return res.Success ? 0 : 1;
+        }
+
+        // Fallback al comportamiento previo: perfiles predefinidos si el archivo no existe
         string[] desiredNames = profileName.ToLowerInvariant() switch
         {
             "work" => new[] { "PA278CGV", "Kamvas 22" },
@@ -129,14 +139,11 @@ static class Cli
 
         if (desiredNames.Length == 0)
         {
-            Console.Error.WriteLine("Perfil desconocido. Use: work | all | tv");
+            Console.Error.WriteLine($"No encontré un perfil JSON llamado '{profileName}' ni un perfil predefinido.");
             return 2;
         }
 
         var desired = new HashSet<string>(desiredNames.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
-
-        // Armar un arreglo de DesiredMonitor para todos los monitores listados,
-        // habilitando sólo los que están en el perfil, y deshabilitando el resto.
         var current = dc.List();
         var plan = new List<DesiredMonitor>(current.Count);
         foreach (var d in current)
@@ -145,10 +152,16 @@ static class Cli
             bool enable = desired.Contains(d.FriendlyName!);
             plan.Add(new DesiredMonitor(d.FriendlyName!, enable));
         }
+        var res2 = dc.SetMonitors(plan);
+        Console.WriteLine(res2.Success ? $"Perfil '{profileName}' aplicado (fallback)." : $"FAIL: {res2.Message}");
+        return res2.Success ? 0 : 1;
+    }
 
-        var res = dc.SetMonitors(plan);
-        Console.WriteLine(res.Success ? $"Perfil '{profileName}' aplicado." : $"FAIL: {res.Message}");
-        return res.Success ? 0 : 1;
+    static int DoSaveProfile(IDisplayConfigurator dc, string? name)
+    {
+        var r = dc.SaveProfile(name);
+        Console.WriteLine(r.Success ? (r.Message ?? "Perfil guardado") : $"FAIL: {r.Message}");
+        return r.Success ? 0 : 1;
     }
 
     static string[] AllFriendly(IDisplayConfigurator dc)
@@ -176,7 +189,25 @@ static class Cli
         Console.WriteLine("  displayctl enable <friendly>");
         Console.WriteLine("  displayctl disable <\\.\\DISPLAYx|friendly>");
         Console.WriteLine("  displayctl setprimary <\\.\\DISPLAYx|friendly>");
-        Console.WriteLine("  displayctl profile <work|all|tv>");
+        Console.WriteLine("  displayctl profile <name>");
+        Console.WriteLine("  displayctl saveprofile [name]");
         return 2;
+    }
+
+    static (bool found, DesiredProfile? profile) TryLoadProfile(string name)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.CurrentDirectory, "profiles");
+            string path = Path.Combine(dir, name + ".json");
+            if (!File.Exists(path)) return (false, null);
+            var json = File.ReadAllText(path);
+            var profile = JsonSerializer.Deserialize<DesiredProfile>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return (profile != null, profile);
+        }
+        catch
+        {
+            return (false, null);
+        }
     }
 }

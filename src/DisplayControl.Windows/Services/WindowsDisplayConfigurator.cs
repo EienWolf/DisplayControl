@@ -314,6 +314,20 @@ namespace DisplayControl.Windows.Services
             if (match == null)
                 return Result.Fail("No se encontró un monitor activo que coincida");
 
+            // Validación: no permitir deshabilitar si es el único monitor activo
+            int activos = _targetsByKey.Values.Count(t => t.Active);
+            if (activos <= 1)
+                return Result.Fail("No se puede deshabilitar el único monitor activo");
+
+            // Validación: no permitir deshabilitar si es el monitor primario (posición 0,0)
+            string sKey = SKey(match.Value.adapter, match.Value.sourceId);
+            if (_sourcesByKey.TryGetValue(sKey, out var srcInfo))
+            {
+                bool esPrimario = srcInfo.HasMode && srcInfo.PosX == 0 && srcInfo.PosY == 0;
+                if (esPrimario)
+                    return Result.Fail("No se puede deshabilitar el monitor primario. Cambie el primario primero.");
+            }
+
             // Construir configuración actual quitando la ruta activa seleccionada
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
                 return Result.Fail("Error obteniendo tamaños de buffers");

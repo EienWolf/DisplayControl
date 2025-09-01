@@ -394,11 +394,11 @@ namespace DisplayControl.Windows.Services
 
             // Identificar el modo "source" del target y del actual primario (pos 0,0)
             int targetModeIndex = -1;
-            int currentPrimaryModeIndex = -1;
             var targetAdapter = targetSource.AdapterId;
             uint targetSourceId = targetSource.SourceId;
-            int prevX = targetSource.HasMode ? targetSource.PosX : 0;
-            int prevY = targetSource.HasMode ? targetSource.PosY : 0;
+            // Tomaremos la posición directamente desde "modes" para asegurar coherencia
+            int prevX = 0;
+            int prevY = 0;
 
             for (int i = 0; i < modeCount; i++)
             {
@@ -407,11 +407,8 @@ namespace DisplayControl.Windows.Services
                     if (modes[i].adapterId.LowPart == targetAdapter.LowPart && modes[i].adapterId.HighPart == targetAdapter.HighPart && modes[i].id == targetSourceId)
                     {
                         targetModeIndex = i;
-                    }
-                    // detectar primario actual por position (0,0)
-                    if (modes[i].sourceMode.position.x == 0 && modes[i].sourceMode.position.y == 0)
-                    {
-                        currentPrimaryModeIndex = i;
+                        prevX = modes[i].sourceMode.position.x;
+                        prevY = modes[i].sourceMode.position.y;
                     }
                 }
             }
@@ -419,15 +416,18 @@ namespace DisplayControl.Windows.Services
             if (targetModeIndex < 0)
                 return Result.Fail("No se encontró el modo del monitor destino");
 
-            // Mover target a (0,0)
-            modes[targetModeIndex].sourceMode.position.x = 0;
-            modes[targetModeIndex].sourceMode.position.y = 0;
+            // Calcular delta para preservar la estructura: desplazar todos los sources
+            // de forma que el monitor objetivo pase a (0,0) y el resto mantenga posiciones relativas.
+            int dx = -prevX;
+            int dy = -prevY;
 
-            // Si había primario actual, moverlo a la posición previa del target para evitar superposición
-            if (currentPrimaryModeIndex >= 0 && currentPrimaryModeIndex != targetModeIndex)
+            for (int i = 0; i < modeCount; i++)
             {
-                modes[currentPrimaryModeIndex].sourceMode.position.x = prevX;
-                modes[currentPrimaryModeIndex].sourceMode.position.y = prevY;
+                if (modes[i].infoType == DISPLAYCONFIG_MODE_INFO_TYPE.SOURCE)
+                {
+                    modes[i].sourceMode.position.x += dx;
+                    modes[i].sourceMode.position.y += dy;
+                }
             }
 
             // Mantener rutas activas como están

@@ -56,39 +56,6 @@ namespace DisplayControl.Windows.Services
 
         private static string SKey(LUID a, uint sourceId) => $"{a.LowPart}:{a.HighPart}:{sourceId}";
         private static string TKey(LUID a, uint targetId) => $"{a.LowPart}:{a.HighPart}:{targetId}";
-        private static bool SameAdapter(LUID a, LUID b) => a.LowPart == b.LowPart && a.HighPart == b.HighPart;
-
-        /// <summary>Gets effective text DPI scaling percent by GDI device name using SHCore.GetDpiForMonitor.</summary>
-        private static Dictionary<string, int> GetTextScaleByGdiName()
-        {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT r, IntPtr data) =>
-                {
-                    var mi = new MONITORINFOEX { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
-                    if (User32Monitor.GetMonitorInfo(hMon, ref mi))
-                    {
-                        try
-                        {
-                            uint dx, dy;
-                            int hr = DisplayControl.Windows.Interop.Shcore.ShcoreMethods.GetDpiForMonitor(hMon, DisplayControl.Windows.Interop.Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
-                            if (hr == 0 && dx != 0)
-                            {
-                                int percent = (int)Math.Round(dx / 96.0 * 100.0);
-                                result[mi.szDevice] = percent;
-
-                            }
-                        }
-                        catch { }
-                    }
-                    return true;
-                }, IntPtr.Zero);
-            }
-            catch { }
-            return result;
-        }
-
 
         /// <summary>Resolves the GDI device name (e.g., \\\\ .\\\\DISPLAYx) for a given source.</summary>
         private static string? GetSourceGdiName(LUID adapterId, uint sourceId)
@@ -120,7 +87,7 @@ namespace DisplayControl.Windows.Services
                 }
             };
             if (User32DisplayConfig.DisplayConfigGetDeviceInfo(ref tgt) != 0) return (null, null, null);
-            string vendor = EdidHelper.DecodePnP((ushort)tgt.edidManufactureId);
+            string vendor = EdidHelper.DecodePnP(tgt.edidManufactureId);
             string prod = $"0x{tgt.edidProductCodeId:X4}";
             return (tgt.monitorFriendlyDeviceName, vendor, prod);
         }
@@ -153,7 +120,7 @@ namespace DisplayControl.Windows.Services
             for (int i = 0; i < pathCount; i++)
             {
                 var p = paths[i];
-                if (p.targetInfo.targetAvailable == false) continue;
+                if (!p.targetInfo.targetAvailable) continue;
 
                 var (friendly, vendor, prodHex) = GetTargetName(p.targetInfo.adapterId, p.targetInfo.id);
                 bool targetAvail = p.targetInfo.targetAvailable;

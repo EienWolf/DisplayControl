@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
-- Planned: WinUI 3 GUI, secure encrypted profiles under LocalAppData, strong profile validation, MSIX packaging with App Execution Alias, post-apply actions and automatic restore. See ROADMAP.md.
+- Planned: WinUI 3 GUI, secure encrypted profiles under LocalAppData, strong profile validation, MSIX packaging with App Execution Alias, post-apply actions and automatic restore. See [ROADMAP](ROADMAP.md).
 
 ## [0.5.0] - 2025-08-31
 ### Added
@@ -43,7 +43,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [0.1.0] - 2025-08-31
 ### Added
-- Initial commit and contributor guide (AGENTS.md).
+- Initial commit and contributor guide ([AGENTS](AGENTS.md)).
 
 [Unreleased]: https://github.com/EienWolf/DisplayControl/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/EienWolf/DisplayControl/releases/tag/v0.5.0

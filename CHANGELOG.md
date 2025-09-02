@@ -45,6 +45,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Added
 - Initial commit and contributor guide (AGENTS.md).
 
-[Unreleased]: https://example.com/compare/v0.5.0...HEAD
-[0.5.0]: https://example.com/releases/tag/v0.5.0
-[0.1.0]: https://example.com/releases/tag/v0.1.0
+[Unreleased]: https://github.com/EienWolf/DisplayControl/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/EienWolf/DisplayControl/releases/tag/v0.5.0
+[0.1.0]: https://github.com/EienWolf/DisplayControl/releases/tag/v0.1.0

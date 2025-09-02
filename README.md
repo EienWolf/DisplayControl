@@ -2,12 +2,14 @@
 
 A Windows-focused tool to inspect and control multi-monitor setups from a command-line interface, with an extensible abstraction layer for future GUI support and Microsoft Store packaging.
 
+Repository: https://github.com/EienWolf/DisplayControl
+
 - Lists displays and rich details (position, resolution, refresh rate, orientation, DPI scaling, HDR hints).
 - Enables/disables displays and sets the primary display.
 - Saves and applies display profiles (JSON) with layout (position), resolution, Hz, and orientation.
 - Designed to evolve toward secure, validated, user-profile storage and a full WinUI 3 GUI.
 
-See `ROADMAP.md` for path to 1.0.0.
+See `ROADMAP.md` for path to 1.0.0. For releases and issues, visit the GitHub repository.
 
 ## Requirements
 - Windows 10/11
@@ -98,4 +100,3 @@ Notes:
 
 ## License
 - Add your license here (e.g., MIT). If you need a template, we can add `LICENSE` upon request.
-

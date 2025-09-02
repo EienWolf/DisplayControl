@@ -1,0 +1,22 @@
+End User License Agreement (EULA)
+
+Licensor: Eien Wolf
+Software: DisplayControl
+Effective Date: 2025-09-02
+
+1. Grant of License
+Licensor grants you a personal, limited, non-exclusive, non-transferable, revocable license to install and use the object code version of the Software for your personal or internal business purposes on devices you own or control.
+
+2. Restrictions
+- No Redistribution: You may not distribute, publish, make available, or otherwise transfer the Software to any third party.
+- No Sublicensing: You may not sublicense, rent, lease, or lend the Software or any rights to it.
+
+3. Ownership
+The Software is licensed, not sold. Licensor retains all rights, title, and interest in and to the Software.
+
+4. Termination
+This EULA terminates automatically if you breach its terms. Upon termination, you must cease all use and delete all copies of the Software.
+
+5. General
+If any provision is held unenforceable, the remaining provisions remain in effect. Failure to enforce a provision is not a waiver.
+

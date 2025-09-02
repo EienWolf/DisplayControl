@@ -25,6 +25,13 @@ IMPORTANT: Language Policy
 - Data: Prefer `record` for immutable DTOs under `Models/`.
 - Formatting: Run `dotnet format` prior to PRs.
 
+## Documentation & Comments
+- XML summaries: All public and private classes and methods must have concise XML `<summary>` documentation. Prefer 1–3 sentences focusing on intent and behavior, not implementation details.
+- Interop docs: For any Win32/Windows interop (P/Invoke types, structs, enums, and methods), include a short summary and a remarks section with a link to the official Microsoft Docs page for that API.
+- Inline comments: Keep inline comments to a minimum. Only add them when the action is non-obvious or complex. Do not restate what the code already conveys.
+- Commented-out code: Do not keep commented-out code. Remove it instead. Use version control history if you need to recover old code.
+- Language: All documentation and comments must be in English.
+
 Internationalization & English Only
 - Public strings (messages, CLI help) should be English by default. If localization is needed, introduce resource files; do not hardcode mixed languages.
 

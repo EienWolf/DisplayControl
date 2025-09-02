@@ -3,6 +3,14 @@ using System.Runtime.InteropServices;
 
 namespace DisplayControl.Windows.Interop.User32
 {
+    /// <summary>
+    /// P/Invoke bindings for DEVMODE-based display settings APIs.
+    /// </summary>
+    /// <remarks>
+    /// - EnumDisplaySettingsEx: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-enumdisplaysettingsexw
+    /// - ChangeDisplaySettingsEx: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw
+    /// - DEVMODE: https://learn.microsoft.com/windows/win32/api/wingdi/ns-wingdi-devmodew
+    /// </remarks>
     internal static class User32DisplaySettings
     {
         public const int ENUM_CURRENT_SETTINGS = -1;
@@ -21,16 +29,26 @@ namespace DisplayControl.Windows.Interop.User32
         public const uint CDS_NORESET = 0x10000000;
         public const uint CDS_RESET = 0x40000000;
 
+        /// <summary>Enumerates display settings for a given device.</summary>
+        /// <remarks>https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-enumdisplaysettingsexw</remarks>
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern bool EnumDisplaySettingsEx(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode, int dwFlags);
 
+        /// <summary>Changes the settings of the default or specified display device.</summary>
+        /// <remarks>https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw</remarks>
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern int ChangeDisplaySettingsEx(string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
 
+        /// <summary>Applies any changes previously registered with CDS_NORESET.</summary>
+        /// <remarks>https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw</remarks>
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        internal static extern int ChangeDisplaySettingsEx(string lpszDeviceName, IntPtr lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
+        internal static extern int ChangeDisplaySettingsEx(string? lpszDeviceName, IntPtr lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
     }
 
+    /// <summary>
+    /// DEVMODE structure for display settings.
+    /// https://learn.microsoft.com/windows/win32/api/wingdi/ns-wingdi-devmodew
+    /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     internal struct DEVMODE
     {

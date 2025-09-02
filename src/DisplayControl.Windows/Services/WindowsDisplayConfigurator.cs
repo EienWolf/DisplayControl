@@ -11,17 +11,18 @@ using System.Text.Json;
 
 namespace DisplayControl.Windows.Services
 {
+    /// <summary>Windows implementation of IDisplayConfigurator using User32 DisplayConfig and DEVMODE APIs.</summary>
     public class WindowsDisplayConfigurator : IDisplayConfigurator
     {
+        /// <summary>Internal model representing a display source (GPU output) in the DisplayConfig topology.</summary>
         private class SourceInfo
         {
             public LUID AdapterId;
             public uint SourceId;
-            public string? GdiName;                   // \\ .\DISPLAYx
+            public string? GdiName;
             public bool Active;
-            public (LUID adapter, uint targetId)? ActiveTarget; // si está activo, a qué target está asociado
-            public HashSet<string> CandidateTargets = new();    // keys de Target que puede alimentar
-            // Datos de modo
+            public (LUID adapter, uint targetId)? ActiveTarget;
+            public HashSet<string> CandidateTargets = new();
             public uint Width;
             public uint Height;
             public int PosX;
@@ -30,6 +31,7 @@ namespace DisplayControl.Windows.Services
             public override string ToString() => $"{GdiName} (src:{SourceId}) {(Active ? "ACTIVE" : "-")}";
         }
 
+        /// <summary>Internal model representing a display target (physical monitor) in the DisplayConfig topology.</summary>
         private class TargetInfo
         {
             public LUID AdapterId;
@@ -39,17 +41,14 @@ namespace DisplayControl.Windows.Services
             public string? ProductHex;
             public bool Available;
             public bool Active;
-            public (LUID adapter, uint sourceId)? ActiveSource; // si está activo, a qué source está asociado
-            public HashSet<string> CandidateSources = new();    // keys de Source que lo pueden alimentar
-            // Frecuencia
+            public (LUID adapter, uint sourceId)? ActiveSource;
+            public HashSet<string> CandidateSources = new();
             public double ActiveRefreshHz;
             public double DesktopRefreshHz;
             public bool HasActiveRefresh;
-            // Orientación y escalado
             public DISPLAYCONFIG_ROTATION Rotation;
             public DISPLAYCONFIG_SCALING Scaling;
             public bool HasTransform;
-            // Color avanzado / HDR
             public bool? HdrSupported;
             public bool? HdrEnabled;
             public string? ColorEncoding;
@@ -57,7 +56,7 @@ namespace DisplayControl.Windows.Services
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
-        // índices
+        // ÃƒÂ­ndices
         private readonly Dictionary<string, SourceInfo> _sourcesByKey = new();
         private readonly Dictionary<string, TargetInfo> _targetsByKey = new();
 
@@ -65,6 +64,7 @@ namespace DisplayControl.Windows.Services
         private static string TKey(LUID a, uint targetId) => $"{a.LowPart}:{a.HighPart}:{targetId}";
         private static bool SameAdapter(LUID a, LUID b) => a.LowPart == b.LowPart && a.HighPart == b.HighPart;
 
+        /// <summary>Gets effective text DPI scaling percent by GDI device name using SHCore.GetDpiForMonitor.</summary>
         private static Dictionary<string, int> GetTextScaleByGdiName()
         {
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -82,21 +82,21 @@ namespace DisplayControl.Windows.Services
                             if (hr == 0 && dx != 0)
                             {
                                 int percent = (int)Math.Round(dx / 96.0 * 100.0);
-                                // mi.szDevice es del tipo \\.\\DISPLAYx
                                 result[mi.szDevice] = percent;
-                                
+
                             }
                         }
-                        catch { /* ignorar si SHCore no disponible */ }
+                        catch { }
                     }
                     return true;
                 }, IntPtr.Zero);
             }
-            catch { /* ambientes sin API */ }
+            catch { }
             return result;
         }
 
-        // util para leer nombres
+
+        /// <summary>Resolves the GDI device name (e.g., \\\\ .\\\\DISPLAYx) for a given source.</summary>
         private static string? GetSourceGdiName(LUID adapterId, uint sourceId)
         {
             var src = new DISPLAYCONFIG_SOURCE_DEVICE_NAME
@@ -112,6 +112,7 @@ namespace DisplayControl.Windows.Services
             return User32DisplayConfig.DisplayConfigGetDeviceInfo(ref src) == 0 ? src.viewGdiDeviceName : null;
         }
 
+        /// <summary>Resolves the target friendly name and EDID information for a given target.</summary>
         private static (string? friendly, string? vendor, string? prodHex) GetTargetName(LUID adapterId, uint targetId)
         {
             var tgt = new DISPLAYCONFIG_TARGET_DEVICE_NAME
@@ -130,20 +131,21 @@ namespace DisplayControl.Windows.Services
             return (tgt.monitorFriendlyDeviceName, vendor, prod);
         }
 
+        /// <summary>Refreshes internal DisplayConfig source/target indices from the current system configuration.</summary>
         private void FillData()
         {
             _sourcesByKey.Clear();
             _targetsByKey.Clear();
 
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error obteniendo tamaños de buffers");
+                throw new Exception("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error obteniendo configuración actual");
+                throw new Exception("Error getting current display configuration");
 
-            // Pre-indexar modos de fuente por adapterId+id
+
             var sourceModes = new Dictionary<string, DISPLAYCONFIG_SOURCE_MODE>();
             for (int m = 0; m < modeCount; m++)
             {
@@ -212,14 +214,12 @@ namespace DisplayControl.Windows.Services
                     tInfo.Available |= targetAvail;
                 }
 
-                // Frecuencia activa desde path.targetInfo.refreshRate
                 if (p.targetInfo.refreshRate.Denominator != 0)
                 {
                     tInfo.ActiveRefreshHz = (double)p.targetInfo.refreshRate.Numerator / p.targetInfo.refreshRate.Denominator;
                     tInfo.HasActiveRefresh = true;
                 }
 
-                // Frecuencia de modo (desktop) si está disponible vía modeInfoIdx
                 if (p.targetInfo.modeInfoIdx != 0xFFFFFFFF)
                 {
                     var mi = modes[p.targetInfo.modeInfoIdx];
@@ -229,7 +229,7 @@ namespace DisplayControl.Windows.Services
                     }
                 }
 
-                // Transformaciones
+
                 tInfo.Rotation = p.targetInfo.rotation;
                 tInfo.Scaling = p.targetInfo.scaling;
                 tInfo.HasTransform = true;
@@ -246,7 +246,7 @@ namespace DisplayControl.Windows.Services
                 }
             }
 
-            // Consultar HDR y color avanzado por cada target disponible
+
             foreach (var t in _targetsByKey.Values)
             {
                 var adv = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
@@ -269,7 +269,7 @@ namespace DisplayControl.Windows.Services
                 }
             }
 
-            // Fallback/heurística: si no pudimos determinar HDR o bits por color, usar DEVMODE del source activo
+
             foreach (var t in _targetsByKey.Values.Where(x => x.Active && x.ActiveSource.HasValue))
             {
                 string sKey = SKey(t.ActiveSource!.Value.adapter, t.ActiveSource!.Value.sourceId);
@@ -286,7 +286,6 @@ namespace DisplayControl.Windows.Services
                                 int bpp = (int)dm.dmBitsPerPel;
                                 t.BitsPerColor = bpp == 30 ? 10 : bpp == 36 ? 12 : bpp >= 24 ? 8 : (int?)null;
                             }
-                            // Si HDR no fue detectado por la API, asumir habilitado si hay >=10 bpc
                             if (!t.HdrEnabled.HasValue || t.HdrEnabled == false)
                             {
                                 if (t.BitsPerColor.HasValue && t.BitsPerColor.Value >= 10)
@@ -302,6 +301,7 @@ namespace DisplayControl.Windows.Services
             }
         }
 
+        /// <summary>Enables an available inactive monitor or one matching the given friendly name.</summary>
         public Result EnableMonitor(string? friendlyName = null)
         {
             FillData();
@@ -310,7 +310,7 @@ namespace DisplayControl.Windows.Services
                 if (_targetsByKey.Values.Any(t => t.Active &&
                     !string.IsNullOrWhiteSpace(t.Friendly) &&
                     t.Friendly.Contains(friendlyName, StringComparison.OrdinalIgnoreCase)))
-                    return Result.Ok("El monitor ya está activo");
+                    return Result.Ok("The monitor is already active");
             }
 
             var allCandidates = _targetsByKey.Values
@@ -327,18 +327,18 @@ namespace DisplayControl.Windows.Services
             {
                 if (allCandidates.Count == 0)
                 {
-                    return Result.Fail("No hay monitores disponibles; verifique conexión y encendido.");
+                    return Result.Fail("No monitors available; check connection and power.");
                 }
                 var optsList = allCandidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
                 string opts = string.Join(", ", optsList);
-                return Result.Fail($"No se encontró el monitor especificado. Opciones: {opts}", optsList);
+                return Result.Fail($"Could not find the specified monitor. Options: {opts}", optsList);
             }
 
             if (friendlyName == null && candidates.Count > 1)
             {
                 var optsList = candidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
                 string opts = string.Join(", ", optsList);
-                return Result.Fail($"Hay varios monitores disponibles. Especifique el nombre. Opciones: {opts}", optsList);
+                return Result.Fail($"Multiple available monitors. Specify a name. Options: {opts}", optsList);
             }
 
             TargetInfo target =
@@ -349,22 +349,23 @@ namespace DisplayControl.Windows.Services
                 .FirstOrDefault(sk => _sourcesByKey.TryGetValue(sk, out var s) && !s.Active);
 
             if (freeSourceKey == null)
-                return Result.Fail("No hay source libre compatible.");
+                return Result.Fail("No compatible free source available.");
 
             var freeSource = _sourcesByKey[freeSourceKey];
             bool ok = SetMonitor((int)freeSource.SourceId, (int)target.TargetId);
-            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig falló");
+            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig failed");
         }
 
+        /// <summary>Activates a path between the specified source and target and applies it.</summary>
         private bool SetMonitor(int sourceid, int targetid)
         {
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error obteniendo tamaños de buffers");
+                throw new Exception("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error obteniendo configuración actual");
+                throw new Exception("Error getting current display configuration");
 
             for (int i = 0; i < pathCount; i++)
             {
@@ -390,29 +391,30 @@ namespace DisplayControl.Windows.Services
             return ok;
         }
 
+        /// <summary>Disables an active monitor resolved by GDI device name or friendly name.</summary>
         public Result DisableMonitor(string displayOrName)
         {
             FillData();
 
-            // Resolver por GDI (\\.\DISPLAYx) o por nombre amigable
+
             (LUID adapter, uint sourceId, uint targetId)? match = null;
 
             bool isGdi = !string.IsNullOrWhiteSpace(displayOrName) && displayOrName.StartsWith("\\\\.\\DISPLAY", System.StringComparison.OrdinalIgnoreCase);
             if (isGdi)
             {
-                // Buscar el source, independientemente de su estado, para saber si ya está deshabilitado
+
                 var srcAny = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase));
                 if (srcAny != null && (!srcAny.Active || !srcAny.ActiveTarget.HasValue))
-                    return Result.Ok("El monitor ya estaba deshabilitado");
+                    return Result.Ok("The monitor was already disabled");
 
-                // Si está activo, preparar datos para deshabilitar
+
                 var src = _sourcesByKey.Values.FirstOrDefault(s => s.GdiName != null && s.GdiName.Equals(displayOrName, StringComparison.OrdinalIgnoreCase) && s.ActiveTarget.HasValue);
                 if (src != null && src.ActiveTarget is var at && at.HasValue)
                     match = (src.AdapterId, src.SourceId, at.Value.targetId);
             }
             else
             {
-                // Si existe algún target que coincida y no está activo, no hay nada que hacer
+
                 var matchingTargets = _targetsByKey.Values
                     .Where(t => !string.IsNullOrWhiteSpace(t.Friendly) && t.Friendly!.Contains(displayOrName, System.StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -421,7 +423,7 @@ namespace DisplayControl.Windows.Services
                 if (tgtActive == null)
                 {
                     if (matchingTargets.Count > 0)
-                        return Result.Ok("El monitor ya estaba deshabilitado");
+                        return Result.Ok("The monitor was already disabled");
                 }
                 else if (tgtActive.ActiveSource is var asrc && asrc.HasValue)
                 {
@@ -431,62 +433,60 @@ namespace DisplayControl.Windows.Services
 
             if (match == null)
             {
-                // Ofrecer opciones: monitores activos (por friendly), ya que sólo se pueden deshabilitar activos
+
                 var activeOpts = _targetsByKey.Values
                     .Where(t => t.Active)
                     .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
                     .ToList();
-                string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
-                return Result.Fail("No se encontró un monitor activo que coincida." + opts, activeOpts);
+                string opts = activeOpts.Count > 0 ? $" Options: {string.Join(", ", activeOpts)}" : string.Empty;
+                return Result.Fail("No matching active monitor found." + opts, activeOpts);
             }
 
-            // Validación: no permitir deshabilitar si es el único monitor activo
+
             int activos = _targetsByKey.Values.Count(t => t.Active);
             if (activos <= 1)
-                return Result.Fail("No se puede deshabilitar el único monitor activo");
+                return Result.Fail("Cannot disable the only active monitor");
 
-            // Validación: no permitir deshabilitar si es el único monitor "primario" (posición 0,0)
+
             string sKey = SKey(match.Value.adapter, match.Value.sourceId);
             if (_sourcesByKey.TryGetValue(sKey, out var srcInfo))
             {
                 bool esPrimario = srcInfo.HasMode && srcInfo.PosX == 0 && srcInfo.PosY == 0;
                 if (esPrimario)
                 {
-                    // Contar cuántos TARGETS activos están en (0,0) (no SOURCES).
-                    // En escenarios de clonación, varios targets comparten un mismo source en (0,0).
-                    // Si hay más de un target activo en (0,0), permitir deshabilitar este.
+
                     int primariosEnCero = _targetsByKey.Values.Count(t =>
                         t.Active && t.ActiveSource.HasValue &&
                         _sourcesByKey.TryGetValue(SKey(t.ActiveSource.Value.adapter, t.ActiveSource.Value.sourceId), out var ts) &&
                         ts.HasMode && ts.PosX == 0 && ts.PosY == 0);
                     if (primariosEnCero > 1)
                     {
-                        // Hay otro "primario" en (0,0), no bloqueamos
+
                     }
                     else
                     {
-                        // Sugerir usar setprimary y mostrar opciones (monitores activos) para reasignar primario
+
                         var activeOpts = _targetsByKey.Values
                             .Where(t => t.Active)
                             .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
                             .ToList();
-                        string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
+                        string opts = activeOpts.Count > 0 ? $" Options: {string.Join(", ", activeOpts)}" : string.Empty;
                         return Result.Fail(
-                            "No se puede deshabilitar el monitor primario. Cambie el primario primero con 'displayctl setprimary <opción>'." + opts,
+                            "Cannot disable the primary monitor. Change the primary first with 'displayctl setprimary <option>'." + opts,
                             activeOpts,
-                            "Use 'displayctl setprimary <friendly>' para elegir el primario");
+                            "Use 'displayctl setprimary <friendly>' to choose the primary");
                     }
                 }
             }
 
-            // Construir configuración actual quitando la ruta activa seleccionada
+
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                return Result.Fail("Error obteniendo tamaños de buffers");
+                return Result.Fail("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                return Result.Fail("Error obteniendo configuración actual");
+                return Result.Fail("Error getting current display configuration");
 
             for (int i = 0; i < pathCount; i++)
             {
@@ -496,7 +496,7 @@ namespace DisplayControl.Windows.Services
                                 paths[i].targetInfo.adapterId.HighPart == match.Value.adapter.HighPart;
                 if (isTarget)
                 {
-                    // Quitar ACTIVE
+
                     paths[i].flags &= ~DISPLAYCONFIG_PATH_INFO_FLAGS.ACTIVE;
                 }
             }
@@ -508,14 +508,15 @@ namespace DisplayControl.Windows.Services
             int rc = User32DisplayConfig.SetDisplayConfig((uint)activePaths.Length, activePaths, (uint)modes.Length, modes, flags);
             bool ok = rc == 0;
             if (ok) FillData();
-            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig falló al deshabilitar");
+            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig failed to disable");
         }
 
+        /// <summary>Sets the given display as primary by GDI device name or friendly name.</summary>
         public Result SetPrimary(string displayOrName)
         {
             FillData();
 
-            // Resolver el monitor objetivo: por GDI (\\.\DISPLAYx) o por nombre amigable
+
             SourceInfo? targetSource = null;
             TargetInfo? targetTarget = null;
 
@@ -526,14 +527,14 @@ namespace DisplayControl.Windows.Services
                 if (targetSource == null)
                 {
                     var activeOpts = _targetsByKey.Values.Where(t => t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
-                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
-                    return Result.Fail("No se encontró el display especificado." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
+                    string opts = activeOpts.Count > 0 ? $" Options: {string.Join(", ", activeOpts)}" : string.Empty;
+                    return Result.Fail("Display not found." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
                 }
                 if (!targetSource.Active || !targetSource.ActiveTarget.HasValue)
                 {
                     var inactiveOpts = _targetsByKey.Values.Where(t => !t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
-                    string opts = inactiveOpts.Count > 0 ? $" Puede activarlo con 'displayctl enable <friendly>'. Opciones: {string.Join(", ", inactiveOpts)}" : string.Empty;
-                    return Result.Fail("El monitor debe estar activo para ser primario." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
+                    string opts = inactiveOpts.Count > 0 ? $" You can enable it with 'displayctl enable <friendly>'. Options: {string.Join(", ", inactiveOpts)}" : string.Empty;
+                    return Result.Fail("Monitor must be active to become primary." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
                 }
                 string tKey = TKey(targetSource.ActiveTarget.Value.adapter, targetSource.ActiveTarget.Value.targetId);
                 _targetsByKey.TryGetValue(tKey, out targetTarget);
@@ -544,40 +545,40 @@ namespace DisplayControl.Windows.Services
                 if (targetTarget == null)
                 {
                     var activeOpts = _targetsByKey.Values.Where(t => t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
-                    string opts = activeOpts.Count > 0 ? $" Opciones: {string.Join(", ", activeOpts)}" : string.Empty;
-                    return Result.Fail("No se encontró el monitor especificado." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
+                    string opts = activeOpts.Count > 0 ? $" Options: {string.Join(", ", activeOpts)}" : string.Empty;
+                    return Result.Fail("Monitor not found." + opts, activeOpts, "Use 'displayctl setprimary <friendly>'");
                 }
                 if (!targetTarget.Active || !targetTarget.ActiveSource.HasValue)
                 {
                     var inactiveOpts = _targetsByKey.Values.Where(t => !t.Active).Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
-                    string opts = inactiveOpts.Count > 0 ? $" Puede activarlo con 'displayctl enable <friendly>'. Opciones: {string.Join(", ", inactiveOpts)}" : string.Empty;
-                    return Result.Fail("El monitor debe estar activo para ser primario." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
+                    string opts = inactiveOpts.Count > 0 ? $" You can enable it with 'displayctl enable <friendly>'. Options: {string.Join(", ", inactiveOpts)}" : string.Empty;
+                    return Result.Fail("Monitor must be active to become primary." + opts, inactiveOpts, "Use 'displayctl enable <friendly>'");
                 }
                 string sKey = SKey(targetTarget.ActiveSource.Value.adapter, targetTarget.ActiveSource.Value.sourceId);
                 _sourcesByKey.TryGetValue(sKey, out targetSource);
             }
 
             if (targetSource == null || targetTarget == null)
-                return Result.Fail("No se pudo resolver el monitor objetivo");
+                return Result.Fail("Could not resolve target monitor");
 
-            // Si ya es primario (posición 0,0), no hacer nada
+
             if (targetSource.HasMode && targetSource.PosX == 0 && targetSource.PosY == 0)
-                return Result.Ok("El monitor ya era primario");
+                return Result.Ok("The monitor was already primary");
 
-            // Obtener configuración actual
+
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                return Result.Fail("Error obteniendo tamaños de buffers");
+                return Result.Fail("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                return Result.Fail("Error obteniendo configuración actual");
+                return Result.Fail("Error getting current display configuration");
 
-            // Identificar el modo "source" del target y del actual primario (pos 0,0)
+
             int targetModeIndex = -1;
             var targetAdapter = targetSource.AdapterId;
             uint targetSourceId = targetSource.SourceId;
-            // Tomaremos la posición directamente desde "modes" para asegurar coherencia
+
             int prevX = 0;
             int prevY = 0;
 
@@ -595,10 +596,9 @@ namespace DisplayControl.Windows.Services
             }
 
             if (targetModeIndex < 0)
-                return Result.Fail("No se encontró el modo del monitor destino");
+                return Result.Fail("Could not find the target monitor mode");
 
-            // Calcular delta para preservar la estructura: desplazar todos los sources
-            // de forma que el monitor objetivo pase a (0,0) y el resto mantenga posiciones relativas.
+
             int dx = -prevX;
             int dy = -prevY;
 
@@ -611,28 +611,26 @@ namespace DisplayControl.Windows.Services
                 }
             }
 
-            // Mantener rutas activas como están
             var activePaths = paths.Where(p => (p.flags & DISPLAYCONFIG_PATH_INFO_FLAGS.ACTIVE) != 0).ToArray();
             var flags = SDC.USE_SUPPLIED_DISPLAY_CONFIG | SDC.APPLY | SDC.SAVE_TO_DATABASE | SDC.ALLOW_CHANGES;
             int rc = User32DisplayConfig.SetDisplayConfig((uint)activePaths.Length, activePaths, (uint)modes.Length, modes, flags);
             bool ok = rc == 0;
             if (ok) FillData();
-            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig falló al establecer primario");
+            return ok ? Result.Ok() : Result.Fail("SetDisplayConfig failed to set primary");
         }
 
+        /// <summary>Enables/disables monitors according to the desired states.</summary>
         public Result SetMonitors(IEnumerable<DesiredMonitor> desiredStates)
         {
             if (desiredStates == null)
-                return Result.Fail("Parámetro 'desiredStates' es nulo");
+                return Result.Fail("Parameter 'desiredStates' is null");
 
-            // Conjunto de nombres deseados habilitados
             var desiredEnabled = new HashSet<string>(
                 desiredStates
                     .Where(d => d.Enabled && !string.IsNullOrWhiteSpace(d.Name))
                     .Select(d => d.Name),
                 StringComparer.OrdinalIgnoreCase);
 
-            // Pre-validar que todos los deseados existen en el sistema (por nombre amigable)
             var current = List();
             var available = new HashSet<string>(
                 current.Select(d => d.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(),
@@ -643,22 +641,19 @@ namespace DisplayControl.Windows.Services
             {
                 var opts = available.ToList();
                 return Result.Fail(
-                    $"No se encontraron los monitores solicitados: {string.Join(", ", missing)}.",
+                    $"Requested monitors not found: {string.Join(", ", missing)}.",
                     opts,
-                    "Verifique el nombre y que el monitor esté conectado");
+                    "Verifique el nombre y que el monitor estÃƒÂ© conectado");
             }
 
-            // 1) Habilitar los monitores deseados
             foreach (var name in desiredEnabled)
             {
                 var r = EnableMonitor(name);
                 if (!r.Success) return r;
             }
 
-            // Estado tras habilitar
             var afterEnable = List();
 
-            // 2) Asegurar primario sólo si hay monitores deseados
             if (desiredEnabled.Count > 0)
             {
                 var currentPrimary = afterEnable.FirstOrDefault(d => d.IsActive && d.IsPrimary);
@@ -678,35 +673,32 @@ namespace DisplayControl.Windows.Services
                 }
             }
 
-            // 3) Deshabilitar los monitores activos que no están en desiredEnabled
             var afterPrimary = List();
             var toDisable = afterPrimary.Where(d => d.IsActive && (string.IsNullOrWhiteSpace(d.FriendlyName) || !desiredEnabled.Contains(d.FriendlyName!)))
                                         .ToList();
             foreach (var d in toDisable)
             {
-                // Usar friendly si existe; si no, caer a GDI
                 var key = d.FriendlyName ?? d.Active?.GdiName;
                 if (string.IsNullOrWhiteSpace(key)) continue;
                 var rd = DisableMonitor(key!);
                 if (!rd.Success) return rd;
             }
 
-            return Result.Ok("Perfil aplicado");
+            return Result.Ok("Profile applied");
         }
 
+        /// <summary>Applies a full display profile including primary, geometry and refresh.</summary>
         public Result SetMonitors(DesiredProfile profile)
         {
             if (profile == null || profile.Monitors == null || profile.Monitors.Count == 0)
-                return Result.Fail("Perfil vacío o nulo");
+                return Result.Fail("Empty or null profile");
 
-            // Validar que todos los monitores del perfil existen
             var current = List();
             var available = new HashSet<string>(current.Select(c => c.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(), StringComparer.OrdinalIgnoreCase);
             var missing = profile.Monitors.Select(m => m.Name).Where(n => !available.Contains(n)).ToList();
             if (missing.Count > 0)
-                return Result.Fail($"Monitores no encontrados en el sistema: {string.Join(", ", missing)}", available.ToList());
+                return Result.Fail($"Monitors not found in the system: {string.Join(", ", missing)}", available.ToList());
 
-            // 1) Asegurar que el primario del perfil esté activo y configurarlo como primario primero
             if (!string.IsNullOrWhiteSpace(profile.PrimaryName))
             {
                 var r1 = EnableMonitor(profile.PrimaryName);
@@ -715,16 +707,14 @@ namespace DisplayControl.Windows.Services
                 if (!r2.Success) return r2;
             }
 
-            // 2) Encender/apagar basados en Enabled del perfil (mantener lógica existente)
             var plan = profile.Monitors.Select(m => new DesiredMonitor(m.Name, m.Enabled)).ToList();
             var r = SetMonitors((IEnumerable<DesiredMonitor>)plan);
             if (!r.Success) return r;
 
-            // 3) Configurar resolución/posición/Hz/orientación con el menor número de llamadas (ChangeDisplaySettingsEx + apply global)
             var r3 = ApplyDisplaySettings(profile);
             if (!r3.Success) return r3;
 
-            return Result.Ok($"Perfil '{profile.Name ?? "(sin nombre)"}' aplicado");
+            return Result.Ok($"Profile '{profile.Name ?? "(unnamed)"}' applied");
         }
 
         private static uint MapOrientationToDm(string? orientation)
@@ -733,25 +723,24 @@ namespace DisplayControl.Windows.Services
                 "rotate90" => 1u,
                 "rotate180" => 2u,
                 "rotate270" => 3u,
-                _ => 0u // Identity
+                _ => 0u
             };
 
+        /// <summary>Applies DEVMODE-based per-monitor settings and performs a global apply.</summary>
         private Result ApplyDisplaySettings(DesiredProfile profile)
         {
-            // Estrategia: para cada monitor Enabled del perfil, preparamos un DEVMODE con los campos relevantes
-            // y llamamos ChangeDisplaySettingsEx con CDS_UPDATEREGISTRY|CDS_NORESET; al final, un apply global.
             foreach (var m in profile.Monitors.Where(m => m.Enabled))
             {
-                // Resolver GDI name (\\.\DISPLAYx) por friendly
                 var gdi = ResolveGdiByFriendly(m.Name);
                 if (string.IsNullOrWhiteSpace(gdi))
-                    return Result.Fail($"No se pudo resolver el dispositivo GDI para '{m.Name}'");
+                    return Result.Fail($"Could not resolve the GDI device for '{m.Name}'");
 
-                var dm = new DEVMODE();
-                dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
+                var dm = new DEVMODE
+                {
+                    dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>()
+                };
 
                 uint fields = 0;
-                // Posición (no aplicar al primario; Windows ignora o usa 0,0 para primario)
                 bool isPrimary = !string.IsNullOrWhiteSpace(profile.PrimaryName) &&
                                  string.Equals(profile.PrimaryName, m.Name, StringComparison.OrdinalIgnoreCase);
                 if (!isPrimary)
@@ -787,20 +776,17 @@ namespace DisplayControl.Windows.Services
                     int rc = User32DisplaySettings.ChangeDisplaySettingsEx(gdi!, ref dm, IntPtr.Zero,
                         User32DisplaySettings.CDS_UPDATEREGISTRY | User32DisplaySettings.CDS_NORESET, IntPtr.Zero);
                     if (rc != User32DisplaySettings.DISP_CHANGE_SUCCESSFUL)
-                        return Result.Fail($"Falló al preparar ajustes para '{m.Name}' (rc={rc})");
+                        return Result.Fail($"Failed to prepare settings for '{m.Name}' (rc={rc})");
                 }
             }
-
-            // Apply global
             int rcApply = User32DisplaySettings.ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
             if (rcApply != User32DisplaySettings.DISP_CHANGE_SUCCESSFUL)
-                return Result.Fail($"Falló al aplicar ajustes (rc={rcApply})");
-
-            // Refrescar índices
+                return Result.Fail($"Failed to apply settings (rc={rcApply})");
             FillData();
             return Result.Ok();
         }
 
+        /// <summary>Resolves the GDI device name (\\\\.\\\\DISPLAYx) for the given friendly name, if currently active.</summary>
         private string? ResolveGdiByFriendly(string friendly)
         {
             FillData();
@@ -814,10 +800,11 @@ namespace DisplayControl.Windows.Services
             return null;
         }
 
+        /// <summary>Saves the current layout as a profile JSON file under the local profiles directory.</summary>
         public Result SaveProfile(string? name = null)
         {
             var current = List();
-            if (current.Count == 0) return Result.Fail("No se pudieron obtener monitores");
+            if (current.Count == 0) return Result.Fail("Could not retrieve monitors");
 
             string? primary = current.FirstOrDefault(c => c.IsActive && c.IsPrimary)?.FriendlyName;
             var monitors = new List<DesiredMonitorConfig>(current.Count);
@@ -847,14 +834,15 @@ namespace DisplayControl.Windows.Services
                 string path = Path.Combine(dir, (name ?? "current") + ".json");
                 var json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(path, json);
-                return Result.Ok($"Perfil guardado en {path}");
+                return Result.Ok($"Profile saved to {path}");
             }
             catch (Exception ex)
             {
-                return Result.Fail($"No se pudo guardar el perfil: {ex.Message}");
+                return Result.Fail($"Could not save profile: {ex.Message}");
             }
         }
 
+        /// <summary>Lists monitors available on the system with their current state and details.</summary>
         public IReadOnlyList<DisplayInfo> List()
         {
             FillData();
@@ -870,7 +858,6 @@ namespace DisplayControl.Windows.Services
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
                         int? txtScale = null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
-                        // Obtener info de DEVMODE para frecuencia activa, profundidad de color y orientación
                         int? devmodeHz = null;
                         int? bpp = null;
                         string? orientationStr = t.HasTransform ? t.Rotation.ToString() : null;
@@ -896,7 +883,6 @@ namespace DisplayControl.Windows.Services
                             catch { }
                         }
 
-                        // TODO: ActiveHz/DesktopHz son aproximaciones; pendiente implementación más precisa (DRR/VRR)
                         double activeHzOut = t.HasActiveRefresh ? t.ActiveRefreshHz : 0.0;
                         if (devmodeHz.HasValue && devmodeHz.Value > 0)
                             activeHzOut = devmodeHz.Value;
@@ -907,7 +893,6 @@ namespace DisplayControl.Windows.Services
                             bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
                         }
 
-                        // TODO: AdaptiveRefreshHz pendiente de obtener desde APIs que expongan tasa instantánea
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -937,3 +922,4 @@ namespace DisplayControl.Windows.Services
         }
     }
 }
+

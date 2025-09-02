@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
-- Planned: WinUI 3 GUI, secure encrypted profiles under LocalAppData, strong profile validation, MSIX packaging with App Execution Alias, post-apply actions and automatic restore. See ROADMAP.md.
+- Planned: WinUI 3 GUI, secure encrypted profiles under LocalAppData, strong profile validation, MSIX packaging with App Execution Alias, post-apply actions and automatic restore. See [ROADMAP](ROADMAP.md).
 
 ## [0.5.0] - 2025-08-31
 ### Added
@@ -41,10 +41,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Active Hz vs Desktop Hz: uses best available signals (DisplayConfig path or DEVMODE); dynamic refresh features may not always show instantaneous rate.
 - Text scaling is read-only; Windows lacks a supported public API to set per-monitor scaling.
 
-## [0.1.0] - 2025-08-31
+## 0.1.0 - 2025-08-31
 ### Added
-- Initial commit and contributor guide (AGENTS.md).
+- Initial commit and contributor guide ([AGENTS](AGENTS.md)).
 
-[Unreleased]: https://example.com/compare/v0.5.0...HEAD
-[0.5.0]: https://example.com/releases/tag/v0.5.0
-[0.1.0]: https://example.com/releases/tag/v0.1.0
+[Unreleased]: https://github.com/EienWolf/DisplayControl/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/EienWolf/DisplayControl/releases/tag/v0.5.0

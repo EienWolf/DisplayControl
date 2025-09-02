@@ -1,8 +1,13 @@
 namespace DisplayControl.Windows.Helpers
 {
+    /// <summary>
+    /// Helpers to decode EDID identifiers.
+    /// </summary>
     internal static class EdidHelper
     {
-        // EDID vendor, p.ej. "GSM" para LG
+        /// <summary>
+        /// Decodes the 16-bit PnP manufacturer ID into a three-letter code (e.g., GSM for LG).
+        /// </summary>
         public static string DecodePnP(ushort id)
         {
             char c1 = (char)(((id >> 10) & 0x1F) + 0x40);
@@ -12,4 +17,3 @@ namespace DisplayControl.Windows.Helpers
         }
     }
 }
-

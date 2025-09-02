@@ -2,16 +2,24 @@ using System;
 
 namespace DisplayControl.Windows.Interop.User32
 {
+    /// <summary>
+    /// QueryDisplayConfig (QDC) flags.
+    /// https://learn.microsoft.com/windows/win32/api/winuser/ne-winuser-qdc
+    /// </summary>
     [Flags]
-    public enum QDC : uint
+    internal enum QDC : uint
     {
         ALL_PATHS = 0x00000001,
         ONLY_ACTIVE_PATHS = 0x00000002,
         DATABASE_CURRENT = 0x00000004
     }
 
+    /// <summary>
+    /// SetDisplayConfig (SDC) flags.
+    /// https://learn.microsoft.com/windows/win32/api/winuser/ne-winuser-sdc
+    /// </summary>
     [Flags]
-    public enum SDC : uint
+    internal enum SDC : uint
     {
         TOPOLOGY_INTERNAL = 0x00000001,
         TOPOLOGY_CLONE = 0x00000002,
@@ -25,4 +33,3 @@ namespace DisplayControl.Windows.Interop.User32
         VIRTUAL_MODE_AWARE = 0x00001000
     }
 }
-

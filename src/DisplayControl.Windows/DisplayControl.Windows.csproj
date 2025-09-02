@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableComHosting>false</EnableComHosting>
     <UseWindowsForms>false</UseWindowsForms>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DisplayControl.Abstractions\DisplayControl.Abstractions.csproj" />

@@ -3,7 +3,11 @@ using System.Runtime.InteropServices;
 
 namespace DisplayControl.Windows.Interop.User32
 {
-    // Enums y flags
+    /// <summary>
+    /// DisplayConfig types and structures for Win32 interop.
+    /// See Display Configuration APIs overview: https://learn.microsoft.com/windows/win32/api/_displaydev/
+    /// </summary>
+    // Enums and flags
     internal enum DISPLAYCONFIG_DEVICE_INFO_TYPE : int
     {
         GET_SOURCE_NAME = 1,
@@ -53,7 +57,7 @@ namespace DisplayControl.Windows.Interop.User32
 
     // Structs
     [StructLayout(LayoutKind.Sequential)]
-    public struct LUID
+    internal struct LUID
     {
         public uint LowPart;
         public int HighPart;

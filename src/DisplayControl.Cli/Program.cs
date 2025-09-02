@@ -8,8 +8,14 @@ using DisplayControl.Abstractions.Models;
 using DisplayControl.Windows.Services;
 using System.Runtime.InteropServices;
 
+/// <summary>
+/// Console entry point for display control operations.
+/// </summary>
 static class Cli
 {
+    /// <summary>
+    /// Entry point. Parses CLI arguments and invokes display operations.
+    /// </summary>
     static int Main(string[] args)
     {
         TryEnablePerMonitorDpiAwareness();
@@ -36,7 +42,7 @@ static class Cli
                 case "saveprofile":
                     return DoSaveProfile(dc, args.Length > 1 ? args[1] : null);
                 default:
-                    Console.Error.WriteLine("Comando no reconocido.");
+                    Console.Error.WriteLine("Unrecognized command.");
                     return PrintHelp();
             }
         }
@@ -47,6 +53,9 @@ static class Cli
         }
     }
 
+    /// <summary>
+    /// Attempts to enable Per-Monitor DPI awareness to improve display queries.
+    /// </summary>
     static void TryEnablePerMonitorDpiAwareness()
     {
         try
@@ -67,6 +76,9 @@ static class Cli
     [DllImport("Shcore.dll")]
     static extern int SetProcessDpiAwareness(int value);
 
+    /// <summary>
+    /// Lists displays with optional details flag.
+    /// </summary>
     static int DoList(IDisplayConfigurator dc, string[] flags)
     {
         bool details = flags.Any(f => string.Equals(f, "--details", StringComparison.OrdinalIgnoreCase) || string.Equals(f, "-d", StringComparison.OrdinalIgnoreCase) || string.Equals(f, "-v", StringComparison.OrdinalIgnoreCase));
@@ -75,7 +87,7 @@ static class Cli
         {
             if (d.IsActive && d.Active is var a && a != null)
             {
-                Console.WriteLine($"- {d.FriendlyName ?? "<sin nombre>"} | ACTIVO | {a.GdiName} | Pos {a.PositionX},{a.PositionY} | {a.Width}x{a.Height} | {a.RefreshHz:F1} Hz{(d.IsPrimary ? " | PRIMARY" : string.Empty)}");
+                Console.WriteLine($"- {d.FriendlyName ?? "<unnamed>"} | ACTIVE | {a.GdiName} | Pos {a.PositionX},{a.PositionY} | {a.Width}x{a.Height} | {a.RefreshHz:F1} Hz{(d.IsPrimary ? " | PRIMARY" : string.Empty)}");
                 if (details)
                 {
                     Console.WriteLine($"    Orientation: {a.Orientation ?? "-"}");
@@ -90,12 +102,15 @@ static class Cli
             }
             else
             {
-                Console.WriteLine($"- {d.FriendlyName ?? "<sin nombre>"} | INACTIVO");
+                Console.WriteLine($"- {d.FriendlyName ?? "<unnamed>"} | INACTIVE");
             }
         }
         return 0;
     }
 
+    /// <summary>
+    /// Enables a monitor by friendly name.
+    /// </summary>
     static int DoEnable(IDisplayConfigurator dc, string name)
     {
         var r = dc.EnableMonitor(name);
@@ -103,6 +118,9 @@ static class Cli
         return r.Success ? 0 : 1;
     }
 
+    /// <summary>
+    /// Disables a monitor by GDI device name or friendly name.
+    /// </summary>
     static int DoDisable(IDisplayConfigurator dc, string name)
     {
         var r = dc.DisableMonitor(name);
@@ -110,6 +128,9 @@ static class Cli
         return r.Success ? 0 : 1;
     }
 
+    /// <summary>
+    /// Sets the primary monitor.
+    /// </summary>
     static int DoSetPrimary(IDisplayConfigurator dc, string name)
     {
         var r = dc.SetPrimary(name);
@@ -117,64 +138,39 @@ static class Cli
         return r.Success ? 0 : 1;
     }
 
+    /// <summary>
+    /// Applies a profile by name from JSON or a built-in fallback.
+    /// </summary>
     static int DoProfile(IDisplayConfigurator dc, string profileName)
     {
-        // Buscar un archivo de perfil JSON
         var (found, profile) = TryLoadProfile(profileName);
         if (found && profile != null)
         {
             var res = dc.SetMonitors(profile);
-            Console.WriteLine(res.Success ? $"Perfil '{profileName}' aplicado." : $"FAIL: {res.Message}");
+            Console.WriteLine(res.Success ? $"Profile '{profileName}' applied." : $"FAIL: {res.Message}");
             return res.Success ? 0 : 1;
         }
-
-        // Fallback al comportamiento previo: perfiles predefinidos si el archivo no existe
-        string[] desiredNames = profileName.ToLowerInvariant() switch
-        {
-            "work" => new[] { "PA278CGV", "Kamvas 22" },
-            "all" => AllFriendly(dc),
-            "tv" => new[] { "LG TV SSCR2" },
-            _ => Array.Empty<string>()
-        };
-
-        if (desiredNames.Length == 0)
-        {
-            Console.Error.WriteLine($"No encontré un perfil JSON llamado '{profileName}' ni un perfil predefinido.");
-            return 2;
-        }
-
-        var desired = new HashSet<string>(desiredNames.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
-        var current = dc.List();
-        var plan = new List<DesiredMonitor>(current.Count);
-        foreach (var d in current)
-        {
-            if (string.IsNullOrWhiteSpace(d.FriendlyName)) continue;
-            bool enable = desired.Contains(d.FriendlyName!);
-            plan.Add(new DesiredMonitor(d.FriendlyName!, enable));
-        }
-        var res2 = dc.SetMonitors(plan);
-        Console.WriteLine(res2.Success ? $"Perfil '{profileName}' aplicado (fallback)." : $"FAIL: {res2.Message}");
-        return res2.Success ? 0 : 1;
+        return 0;
     }
 
+    /// <summary>
+    /// Saves the current layout to a JSON profile.
+    /// </summary>
     static int DoSaveProfile(IDisplayConfigurator dc, string? name)
     {
         var r = dc.SaveProfile(name);
-        Console.WriteLine(r.Success ? (r.Message ?? "Perfil guardado") : $"FAIL: {r.Message}");
+        Console.WriteLine(r.Success ? (r.Message ?? "Profile saved") : $"FAIL: {r.Message}");
         return r.Success ? 0 : 1;
     }
 
-    static string[] AllFriendly(IDisplayConfigurator dc)
-    {
-        var list = dc.List();
-        return list.Select(l => l.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n)).Cast<string>().ToArray();
-    }
-
+    /// <summary>
+    /// Ensures an argument exists at the given index, otherwise prints usage.
+    /// </summary>
     static bool RequireArg(string[] args, int index, string usage, out string? value)
     {
         if (args.Length <= index)
         {
-            Console.Error.WriteLine("Uso: " + usage);
+            Console.Error.WriteLine("Usage: " + usage);
             value = null;
             return false;
         }
@@ -182,9 +178,12 @@ static class Cli
         return true;
     }
 
+    /// <summary>
+    /// Prints CLI usage.
+    /// </summary>
     static int PrintHelp()
     {
-        Console.WriteLine("Uso:");
+        Console.WriteLine("Usage:");
         Console.WriteLine("  displayctl list [--details|-d|-v]");
         Console.WriteLine("  displayctl enable <friendly>");
         Console.WriteLine("  displayctl disable <\\.\\DISPLAYx|friendly>");
@@ -194,6 +193,9 @@ static class Cli
         return 2;
     }
 
+    /// <summary>
+    /// Attempts to load a JSON profile by name from the local profiles directory.
+    /// </summary>
     static (bool found, DesiredProfile? profile) TryLoadProfile(string name)
     {
         try
@@ -211,3 +213,4 @@ static class Cli
         }
     }
 }
+

@@ -15,7 +15,7 @@ namespace DisplayControl.Windows.Services
     public class WindowsDisplayConfigurator : IDisplayConfigurator
     {
         /// <summary>Internal model representing a display source (GPU output) in the DisplayConfig topology.</summary>
-        private class SourceInfo
+        private sealed class SourceInfo
         {
             public LUID AdapterId;
             public uint SourceId;
@@ -32,7 +32,7 @@ namespace DisplayControl.Windows.Services
         }
 
         /// <summary>Internal model representing a display target (physical monitor) in the DisplayConfig topology.</summary>
-        private class TargetInfo
+        private sealed class TargetInfo
         {
             public LUID AdapterId;
             public uint TargetId;
@@ -44,15 +44,9 @@ namespace DisplayControl.Windows.Services
             public (LUID adapter, uint sourceId)? ActiveSource;
             public HashSet<string> CandidateSources = new();
             public double ActiveRefreshHz;
-            public double DesktopRefreshHz;
             public bool HasActiveRefresh;
             public DISPLAYCONFIG_ROTATION Rotation;
-            public DISPLAYCONFIG_SCALING Scaling;
             public bool HasTransform;
-            public bool? HdrSupported;
-            public bool? HdrEnabled;
-            public string? ColorEncoding;
-            public int? BitsPerColor;
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
@@ -220,18 +214,8 @@ namespace DisplayControl.Windows.Services
                     tInfo.HasActiveRefresh = true;
                 }
 
-                if (p.targetInfo.modeInfoIdx != 0xFFFFFFFF)
-                {
-                    var mi = modes[p.targetInfo.modeInfoIdx];
-                    if (mi.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.TARGET && mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator != 0)
-                    {
-                        tInfo.DesktopRefreshHz = (double)mi.targetMode.targetVideoSignalInfo.vSyncFreq.Numerator / mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
-                    }
-                }
-
-
+                // Note: We no longer compute desktop refresh independently; ActiveRefreshHz is sufficient for simplified output.
                 tInfo.Rotation = p.targetInfo.rotation;
-                tInfo.Scaling = p.targetInfo.scaling;
                 tInfo.HasTransform = true;
 
                 if (!tInfo.Active && !active && !sInfo.Active)
@@ -247,58 +231,7 @@ namespace DisplayControl.Windows.Services
             }
 
 
-            foreach (var t in _targetsByKey.Values)
-            {
-                var adv = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
-                {
-                    header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
-                    {
-                        type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_TARGET_ADVANCED_COLOR_INFO,
-                        size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>(),
-                        adapterId = t.AdapterId,
-                        id = t.TargetId
-                    }
-                };
-                int rc = User32DisplayConfig.DisplayConfigGetDeviceInfo(ref adv);
-                if (rc == 0)
-                {
-                    t.HdrSupported = adv.advancedColorSupported;
-                    t.HdrEnabled = adv.advancedColorEnabled;
-                    t.ColorEncoding = adv.colorEncoding.ToString();
-                    t.BitsPerColor = (int)adv.bitsPerColorChannel;
-                }
-            }
-
-
-            foreach (var t in _targetsByKey.Values.Where(x => x.Active && x.ActiveSource.HasValue))
-            {
-                string sKey = SKey(t.ActiveSource!.Value.adapter, t.ActiveSource!.Value.sourceId);
-                if (_sourcesByKey.TryGetValue(sKey, out var s) && !string.IsNullOrWhiteSpace(s.GdiName))
-                {
-                    try
-                    {
-                        var dm = new DEVMODE();
-                        dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
-                        if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
-                        {
-                            if (!t.BitsPerColor.HasValue && dm.dmBitsPerPel > 0)
-                            {
-                                int bpp = (int)dm.dmBitsPerPel;
-                                t.BitsPerColor = bpp == 30 ? 10 : bpp == 36 ? 12 : bpp >= 24 ? 8 : (int?)null;
-                            }
-                            if (!t.HdrEnabled.HasValue || t.HdrEnabled == false)
-                            {
-                                if (t.BitsPerColor.HasValue && t.BitsPerColor.Value >= 10)
-                                {
-                                    t.HdrEnabled = true;
-                                    t.HdrSupported ??= true;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
+            // Note: Advanced color/HDR and bits-per-color collection removed in simplified model.
         }
 
         /// <summary>Enables an available inactive monitor or one matching the given friendly name.</summary>

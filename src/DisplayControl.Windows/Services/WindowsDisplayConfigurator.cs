@@ -819,9 +819,9 @@ namespace DisplayControl.Windows.Services
                     a?.PositionY ?? 0,
                     a?.Width ?? 0,
                     a?.Height ?? 0,
-                    a?.ActiveRefreshHz ?? 0.0,
+                    a?.RefreshHz ?? 0.0,
                     a?.Orientation,
-                    a?.TextScalePercent
+                    null
                 ));
             }
 
@@ -846,7 +846,6 @@ namespace DisplayControl.Windows.Services
         public IReadOnlyList<DisplayInfo> List()
         {
             FillData();
-            var textScale = GetTextScaleByGdiName();
             var result = new List<DisplayInfo>(_targetsByKey.Count);
             foreach (var t in _targetsByKey.Values.Where(t => t.Available))
             {
@@ -856,10 +855,7 @@ namespace DisplayControl.Windows.Services
                     if (_sourcesByKey.TryGetValue(sk, out var s))
                     {
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
-                        int? txtScale = null;
-                        if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
                         int? devmodeHz = null;
-                        int? bpp = null;
                         string? orientationStr = t.HasTransform ? t.Rotation.ToString() : null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName))
                         {
@@ -870,7 +866,6 @@ namespace DisplayControl.Windows.Services
                                 if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, User32DisplaySettings.EDS_ROTATEDMODE))
                                 {
                                     if (dm.dmDisplayFrequency > 0) devmodeHz = (int)dm.dmDisplayFrequency;
-                                    if (dm.dmBitsPerPel > 0) bpp = (int)dm.dmBitsPerPel;
                                     orientationStr = dm.dmDisplayOrientation switch
                                     {
                                         1 => "Rotate90",
@@ -887,12 +882,6 @@ namespace DisplayControl.Windows.Services
                         if (devmodeHz.HasValue && devmodeHz.Value > 0)
                             activeHzOut = devmodeHz.Value;
 
-                        int? bitsPerColor = t.BitsPerColor;
-                        if (!bitsPerColor.HasValue && bpp.HasValue)
-                        {
-                            bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
-                        }
-
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -900,17 +889,7 @@ namespace DisplayControl.Windows.Services
                             s.Width,
                             s.Height,
                             activeHzOut,
-                            orientationStr,
-                            t.HasTransform ? t.Scaling.ToString() : null,
-                            txtScale,
-                            activeHzOut,
-                            t.DesktopRefreshHz,
-                            0.0,
-                            t.HdrSupported,
-                            t.HdrEnabled,
-                            t.ColorEncoding,
-                            bitsPerColor,
-                            null
+                            orientationStr
                         );
                         result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
                         continue;

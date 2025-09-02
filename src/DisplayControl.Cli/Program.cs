@@ -91,13 +91,6 @@ static class Cli
                 if (details)
                 {
                     Console.WriteLine($"    Orientation: {a.Orientation ?? "-"}");
-                    Console.WriteLine($"    ScalingMode: {a.Scaling ?? "-"}");
-                    Console.WriteLine($"    TextScale: {(a.TextScalePercent.HasValue ? a.TextScalePercent + "%" : "-")}");
-                    Console.WriteLine($"    ActiveHz: {(a.ActiveRefreshHz > 0 ? a.ActiveRefreshHz.ToString("F1") : "-")}");
-                    Console.WriteLine($"    DesktopHz: {(a.DesktopRefreshHz > 0 ? a.DesktopRefreshHz.ToString("F1") : "-")}");
-                    Console.WriteLine($"    AdaptiveHz: {(a.AdaptiveRefreshHz > 0 ? a.AdaptiveRefreshHz.ToString("F1") : "-")}");
-                    Console.WriteLine($"    HDR: {(a.HdrSupported == true ? (a.HdrEnabled == true ? "Enabled" : "Supported") : "No")}");
-                    Console.WriteLine($"    Color: {(a.ColorEncoding ?? "-")}, {(a.BitsPerColor?.ToString() ?? "-")} bpc");
                 }
             }
             else

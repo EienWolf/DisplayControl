@@ -25,7 +25,7 @@ namespace DisplayControl.Cli
             {
                 return PrintHelp();
             }
-            
+
             try
             {
                 switch (args[0].ToLowerInvariant())

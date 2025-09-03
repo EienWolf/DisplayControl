@@ -50,7 +50,6 @@ namespace DisplayControl.Windows.Services
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
-        // ÃƒÂ­ndices
         private readonly Dictionary<string, SourceInfo> _sourcesByKey = new();
         private readonly Dictionary<string, TargetInfo> _targetsByKey = new();
 
@@ -99,12 +98,12 @@ namespace DisplayControl.Windows.Services
             _targetsByKey.Clear();
 
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error getting buffer sizes");
+                throw new DisplayControlException("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error getting current display configuration");
+                throw new DisplayControlException("Error getting current display configuration");
 
 
             var sourceModes = new Dictionary<string, DISPLAYCONFIG_SOURCE_MODE>();
@@ -196,9 +195,6 @@ namespace DisplayControl.Windows.Services
                     tInfo.ActiveSource = (p.sourceInfo.adapterId, p.sourceInfo.id);
                 }
             }
-
-
-            // Note: Advanced color/HDR and bits-per-color collection removed in simplified model.
         }
 
         /// <summary>Enables an available inactive monitor or one matching the given friendly name.</summary>
@@ -213,8 +209,11 @@ namespace DisplayControl.Windows.Services
                     return Result.Ok("The monitor is already active");
             }
 
-            var allCandidates = _targetsByKey.Values
-                .Where(t => t.Available && !t.Active).ToList();
+            var allCandidates = _targetsByKey.Values.Where(t => t.Available && !t.Active).ToList();
+            if (allCandidates.Count == 0)
+            {
+                return Result.Fail("No monitors available; check connection and power.");
+            }
 
             var candidates = _targetsByKey.Values
                 .Where(t => t.Available && !t.Active &&
@@ -225,10 +224,6 @@ namespace DisplayControl.Windows.Services
 
             if (candidates.Count == 0)
             {
-                if (allCandidates.Count == 0)
-                {
-                    return Result.Fail("No monitors available; check connection and power.");
-                }
                 var optsList = allCandidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
                 string opts = string.Join(", ", optsList);
                 return Result.Fail($"Could not find the specified monitor. Options: {opts}", optsList);
@@ -260,12 +255,12 @@ namespace DisplayControl.Windows.Services
         private bool SetMonitor(int sourceid, int targetid)
         {
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error getting buffer sizes");
+                throw new DisplayControlException("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error getting current display configuration");
+                throw new DisplayControlException("Error getting current display configuration");
 
             for (int i = 0; i < pathCount; i++)
             {
@@ -359,13 +354,8 @@ namespace DisplayControl.Windows.Services
                         t.Active && t.ActiveSource.HasValue &&
                         _sourcesByKey.TryGetValue(SKey(t.ActiveSource.Value.adapter, t.ActiveSource.Value.sourceId), out var ts) &&
                         ts.HasMode && ts.PosX == 0 && ts.PosY == 0);
-                    if (primariosEnCero > 1)
+                    if (primariosEnCero == 1)
                     {
-
-                    }
-                    else
-                    {
-
                         var activeOpts = _targetsByKey.Values
                             .Where(t => t.Active)
                             .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
@@ -791,11 +781,11 @@ namespace DisplayControl.Windows.Services
                             activeHzOut,
                             orientationStr
                         );
-                        result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
+                        result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active, t.TargetId));
                         continue;
                     }
                 }
-                result.Add(new DisplayInfo(t.Friendly, false, false, null));
+                result.Add(new DisplayInfo(t.Friendly, false, false, null, t.TargetId));
             }
             return result;
         }

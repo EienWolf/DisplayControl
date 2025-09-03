@@ -7,11 +7,13 @@ namespace DisplayControl.Abstractions.Models
     /// <param name="IsActive">True if the display is currently active.</param>
     /// <param name="IsPrimary">True if the display is the primary (top-left at 0,0).</param>
     /// <param name="Active">Active details when the display is active; otherwise null.</param>
+    /// <param name="TargetId">Underlying Windows target identifier for this display.</param>
     public record DisplayInfo(
         string? FriendlyName,
         bool IsActive,
         bool IsPrimary,
-        ActiveDetails? Active
+        ActiveDetails? Active,
+        uint TargetId
     );
 
     /// <summary>

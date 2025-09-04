@@ -1,17 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWinUI>true</UseWinUI>
     <EnablePreviewMsixTooling>false</EnablePreviewMsixTooling>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Allow building with newer .NET SDKs by explicitly setting the Windows SDK ref pack -->
+    <WindowsSdkPackageVersion>10.0.26100.38</WindowsSdkPackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Pick latest 1.x at restore time to ensure .NET 8 compatibility -->
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="[1.6.0,2.0.0)" />
+    <!-- Pin to a stable 1.6 patch while we stabilize .NET 9 build -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.240829007" />
+    <!-- Build tools for WinUI/MSIX tasks when VS packaging tools are not present -->
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,4 +24,3 @@
   </ItemGroup>
 
 </Project>
-

@@ -816,7 +816,7 @@ namespace DisplayControl.Windows.Services
             return null;
         }
 
-        /// <summary>Saves the current layout as a profile JSON file under the local profiles directory.</summary>
+        /// <summary>Saves the current layout as a profile JSON file under the user's .ewDisplayControl directory.</summary>
         public Result SaveProfile(string? name = null)
         {
             var current = List();
@@ -845,7 +845,8 @@ namespace DisplayControl.Windows.Services
 
             try
             {
-                string dir = Path.Combine(Environment.CurrentDirectory, "profiles");
+                string userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string dir = Path.Combine(userDir, ".ewDisplayControl");
                 Directory.CreateDirectory(dir);
                 string path = Path.Combine(dir, (name ?? "current") + ".json");
                 var json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });

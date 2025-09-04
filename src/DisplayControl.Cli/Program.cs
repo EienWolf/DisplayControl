@@ -172,13 +172,14 @@ namespace DisplayControl.Cli
         }
 
         /// <summary>
-        /// Attempts to load a JSON profile by name from the local profiles directory.
+        /// Attempts to load a JSON profile by name from the user's .ewDisplayControl directory.
         /// </summary>
         static (bool found, DesiredProfile? profile) TryLoadProfile(string name)
         {
             try
             {
-                string dir = Path.Combine(Environment.CurrentDirectory, "profiles");
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string dir = Path.Combine(home, ".ewDisplayControl");
                 string path = Path.Combine(dir, name + ".json");
                 if (!File.Exists(path)) return (false, null);
                 var json = File.ReadAllText(path);

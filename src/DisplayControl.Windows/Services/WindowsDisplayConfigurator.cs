@@ -8,6 +8,7 @@ using DisplayControl.Windows.Interop.User32;
 using DisplayControl.Windows.Interop.Shcore;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 
 namespace DisplayControl.Windows.Services
 {
@@ -577,12 +578,78 @@ namespace DisplayControl.Windows.Services
             return Result.Ok("Profile applied");
         }
 
-        /// <summary>Applies a full display profile including primary, geometry and refresh.</summary>
+        /// <summary>Applies a full display profile including primary, geometry and refresh with rollback + confirmation.</summary>
         public Result SetMonitors(DesiredProfile profile)
         {
             if (profile == null || profile.Monitors == null || profile.Monitors.Count == 0)
                 return Result.Fail("Empty or null profile");
 
+            // Capture current layout to enable rollback on failure or if user does not confirm.
+            var snapshot = CreateSnapshotProfile();
+
+            // Apply the requested profile.
+            var apply = ApplyFullProfile(profile);
+            if (!apply.Success)
+            {
+                var rb = ApplyFullProfile(snapshot);
+                if (!rb.Success)
+                {
+                    FallbackEnsurePrimary(snapshot.PrimaryName);
+                }
+                return Result.Fail(apply.Message ?? "Failed to apply profile");
+            }
+
+            // Ask for confirmation with a top-most dialog; revert on timeout or cancel.
+            bool keep = PromptKeepChangesWithTimeout(
+                title: "DisplayControl — Keep display changes?",
+                message: "Keep these display settings?\nChanges will revert automatically in 15 seconds.",
+                timeoutSeconds: 15);
+
+            if (keep)
+                return Result.Ok($"Profile '{profile.Name ?? "(unnamed)"}' applied and confirmed");
+
+            var revert = ApplyFullProfile(snapshot);
+            if (!revert.Success)
+            {
+                FallbackEnsurePrimary(snapshot.PrimaryName);
+                return Result.Fail("Changes reverted using safety fallback (could not restore full layout)");
+            }
+
+            return Result.Ok("Changes reverted");
+        }
+
+        /// <summary>
+        /// Builds an in-memory DesiredProfile snapshot of the current layout.
+        /// </summary>
+        private DesiredProfile CreateSnapshotProfile()
+        {
+            var current = List();
+            string? primary = current.FirstOrDefault(c => c.IsActive && c.IsPrimary)?.FriendlyName;
+            var monitors = new List<DesiredMonitorConfig>(current.Count);
+            foreach (var d in current)
+            {
+                if (string.IsNullOrWhiteSpace(d.FriendlyName)) continue;
+                var a = d.Active;
+                monitors.Add(new DesiredMonitorConfig(
+                    d.FriendlyName!,
+                    d.IsActive,
+                    a?.PositionX ?? 0,
+                    a?.PositionY ?? 0,
+                    a?.Width ?? 0,
+                    a?.Height ?? 0,
+                    a?.RefreshHz ?? 0.0,
+                    a?.Orientation,
+                    null
+                ));
+            }
+            return new DesiredProfile("snapshot", primary, monitors);
+        }
+
+        /// <summary>
+        /// Applies a full profile (enable/disable, set primary, geometry, refresh). Does not prompt.
+        /// </summary>
+        private Result ApplyFullProfile(DesiredProfile profile)
+        {
             var current = List();
             var available = new HashSet<string>(current.Select(c => c.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(), StringComparer.OrdinalIgnoreCase);
             var missing = profile.Monitors.Select(m => m.Name).Where(n => !available.Contains(n)).ToList();
@@ -604,7 +671,66 @@ namespace DisplayControl.Windows.Services
             var r3 = ApplyDisplaySettings(profile);
             if (!r3.Success) return r3;
 
-            return Result.Ok($"Profile '{profile.Name ?? "(unnamed)"}' applied");
+            return Result.Ok();
+        }
+
+        /// <summary>
+        /// Best-effort fallback: enable and set as primary the provided monitor name.
+        /// </summary>
+        private void FallbackEnsurePrimary(string? primaryName)
+        {
+            if (string.IsNullOrWhiteSpace(primaryName)) return;
+            try { _ = EnableMonitor(primaryName!); } catch { }
+            try { _ = SetPrimary(primaryName!); } catch { }
+        }
+
+        /// <summary>
+        /// Shows a top-most confirmation dialog and waits up to the specified timeout.
+        /// Returns true to keep changes; false to revert (cancel or timeout).
+        /// </summary>
+        private bool PromptKeepChangesWithTimeout(string title, string message, int timeoutSeconds)
+        {
+            using var done = new ManualResetEvent(false);
+            bool? keep = null;
+            string caption = title;
+
+            Thread t = new Thread(() =>
+            {
+                try
+                {
+                    int res = Interop.User32.User32Dialogs.MessageBoxTopMost(IntPtr.Zero, message, caption,
+                        Interop.User32.User32Dialogs.MB_YESNO | Interop.User32.User32Dialogs.MB_ICONQUESTION | Interop.User32.User32Dialogs.MB_SETFOREGROUND);
+                    keep = (res == Interop.User32.User32Dialogs.IDYES);
+                }
+                catch
+                {
+                    keep = false;
+                }
+                finally
+                {
+                    done.Set();
+                }
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+
+            if (!done.WaitOne(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds))))
+            {
+                // Timeout: attempt to close the message box window and revert.
+                try
+                {
+                    var hWnd = Interop.User32.User32Dialogs.FindWindowByCaption(caption);
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        Interop.User32.User32Dialogs.PostClose(hWnd);
+                    }
+                }
+                catch { }
+                return false;
+            }
+
+            return keep ?? false;
         }
 
         private static uint MapOrientationToDm(string? orientation)

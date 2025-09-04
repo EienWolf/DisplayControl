@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWinUI>true</UseWinUI>
+    <EnablePreviewMsixTooling>false</EnablePreviewMsixTooling>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pick latest 1.x at restore time to ensure .NET 8 compatibility -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="[1.6.0,2.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DisplayControl.Abstractions\DisplayControl.Abstractions.csproj" />
+    <ProjectReference Include="..\DisplayControl.Windows\DisplayControl.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
+

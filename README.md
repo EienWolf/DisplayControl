@@ -101,3 +101,12 @@ Notes:
 ## License
 - Source code: MIT License with Commons Clause. See [LICENSE](LICENSE).
 - Microsoft Store binary: governed by [EULA.txt](EULA.txt) (no redistribution, no sublicensing).
+
+## GUI (WinUI 3)
+A minimal WinUI 3 desktop app has been added under `src/DisplayControl.Gui`.
+
+- Target: `.NET 8` with `Microsoft.WindowsAppSDK` (WinUI 3)
+- Run (from solution root): open in Visual Studio 2022 (Windows) or use `dotnet build` (building requires Windows SDK + Windows App SDK tooling)
+- References: `DisplayControl.Abstractions`, `DisplayControl.Windows`
+
+This is a placeholder shell window to enable subsequent GUI work for 0.6.0.

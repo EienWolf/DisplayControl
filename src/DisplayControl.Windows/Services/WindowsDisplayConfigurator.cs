@@ -592,11 +592,15 @@ namespace DisplayControl.Windows.Services
             if (!apply.Success)
             {
                 var rb = ApplyFullProfile(snapshot);
-                if (!rb.Success)
+                if (rb.Success)
+                {
+                    return Result.Fail("Failed to apply profile; previous layout restored");
+                }
+                else
                 {
                     FallbackEnsurePrimary(snapshot.PrimaryName);
+                    return Result.Fail("Failed to apply profile; applied safety fallback (could not restore full layout)");
                 }
-                return Result.Fail(apply.Message ?? "Failed to apply profile");
             }
 
             // Ask for confirmation with a top-most dialog; revert on timeout or cancel.

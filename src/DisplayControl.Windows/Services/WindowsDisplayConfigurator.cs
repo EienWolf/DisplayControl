@@ -8,6 +8,7 @@ using DisplayControl.Windows.Interop.User32;
 using DisplayControl.Windows.Interop.Shcore;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 
 namespace DisplayControl.Windows.Services
 {
@@ -15,7 +16,7 @@ namespace DisplayControl.Windows.Services
     public class WindowsDisplayConfigurator : IDisplayConfigurator
     {
         /// <summary>Internal model representing a display source (GPU output) in the DisplayConfig topology.</summary>
-        private class SourceInfo
+        private sealed class SourceInfo
         {
             public LUID AdapterId;
             public uint SourceId;
@@ -32,7 +33,7 @@ namespace DisplayControl.Windows.Services
         }
 
         /// <summary>Internal model representing a display target (physical monitor) in the DisplayConfig topology.</summary>
-        private class TargetInfo
+        private sealed class TargetInfo
         {
             public LUID AdapterId;
             public uint TargetId;
@@ -44,57 +45,17 @@ namespace DisplayControl.Windows.Services
             public (LUID adapter, uint sourceId)? ActiveSource;
             public HashSet<string> CandidateSources = new();
             public double ActiveRefreshHz;
-            public double DesktopRefreshHz;
             public bool HasActiveRefresh;
             public DISPLAYCONFIG_ROTATION Rotation;
-            public DISPLAYCONFIG_SCALING Scaling;
             public bool HasTransform;
-            public bool? HdrSupported;
-            public bool? HdrEnabled;
-            public string? ColorEncoding;
-            public int? BitsPerColor;
             public override string ToString() => $"'{Friendly}' [{Vendor}/{ProductHex}] (tgt:{TargetId}) {(Active ? "ACTIVE" : "-")}";
         }
 
-        // ÃƒÂ­ndices
         private readonly Dictionary<string, SourceInfo> _sourcesByKey = new();
         private readonly Dictionary<string, TargetInfo> _targetsByKey = new();
 
         private static string SKey(LUID a, uint sourceId) => $"{a.LowPart}:{a.HighPart}:{sourceId}";
         private static string TKey(LUID a, uint targetId) => $"{a.LowPart}:{a.HighPart}:{targetId}";
-        private static bool SameAdapter(LUID a, LUID b) => a.LowPart == b.LowPart && a.HighPart == b.HighPart;
-
-        /// <summary>Gets effective text DPI scaling percent by GDI device name using SHCore.GetDpiForMonitor.</summary>
-        private static Dictionary<string, int> GetTextScaleByGdiName()
-        {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                User32Monitor.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT r, IntPtr data) =>
-                {
-                    var mi = new MONITORINFOEX { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
-                    if (User32Monitor.GetMonitorInfo(hMon, ref mi))
-                    {
-                        try
-                        {
-                            uint dx, dy;
-                            int hr = DisplayControl.Windows.Interop.Shcore.ShcoreMethods.GetDpiForMonitor(hMon, DisplayControl.Windows.Interop.Shcore.MonitorDpiType.MDT_EFFECTIVE_DPI, out dx, out dy);
-                            if (hr == 0 && dx != 0)
-                            {
-                                int percent = (int)Math.Round(dx / 96.0 * 100.0);
-                                result[mi.szDevice] = percent;
-
-                            }
-                        }
-                        catch { }
-                    }
-                    return true;
-                }, IntPtr.Zero);
-            }
-            catch { }
-            return result;
-        }
-
 
         /// <summary>Resolves the GDI device name (e.g., \\\\ .\\\\DISPLAYx) for a given source.</summary>
         private static string? GetSourceGdiName(LUID adapterId, uint sourceId)
@@ -126,7 +87,7 @@ namespace DisplayControl.Windows.Services
                 }
             };
             if (User32DisplayConfig.DisplayConfigGetDeviceInfo(ref tgt) != 0) return (null, null, null);
-            string vendor = EdidHelper.DecodePnP((ushort)tgt.edidManufactureId);
+            string vendor = EdidHelper.DecodePnP(tgt.edidManufactureId);
             string prod = $"0x{tgt.edidProductCodeId:X4}";
             return (tgt.monitorFriendlyDeviceName, vendor, prod);
         }
@@ -138,12 +99,12 @@ namespace DisplayControl.Windows.Services
             _targetsByKey.Clear();
 
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error getting buffer sizes");
+                throw new DisplayControlException("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error getting current display configuration");
+                throw new DisplayControlException("Error getting current display configuration");
 
 
             var sourceModes = new Dictionary<string, DISPLAYCONFIG_SOURCE_MODE>();
@@ -159,7 +120,7 @@ namespace DisplayControl.Windows.Services
             for (int i = 0; i < pathCount; i++)
             {
                 var p = paths[i];
-                if (p.targetInfo.targetAvailable == false) continue;
+                if (!p.targetInfo.targetAvailable) continue;
 
                 var (friendly, vendor, prodHex) = GetTargetName(p.targetInfo.adapterId, p.targetInfo.id);
                 bool targetAvail = p.targetInfo.targetAvailable;
@@ -220,18 +181,8 @@ namespace DisplayControl.Windows.Services
                     tInfo.HasActiveRefresh = true;
                 }
 
-                if (p.targetInfo.modeInfoIdx != 0xFFFFFFFF)
-                {
-                    var mi = modes[p.targetInfo.modeInfoIdx];
-                    if (mi.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.TARGET && mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator != 0)
-                    {
-                        tInfo.DesktopRefreshHz = (double)mi.targetMode.targetVideoSignalInfo.vSyncFreq.Numerator / mi.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
-                    }
-                }
-
-
+                // Note: We no longer compute desktop refresh independently; ActiveRefreshHz is sufficient for simplified output.
                 tInfo.Rotation = p.targetInfo.rotation;
-                tInfo.Scaling = p.targetInfo.scaling;
                 tInfo.HasTransform = true;
 
                 if (!tInfo.Active && !active && !sInfo.Active)
@@ -243,60 +194,6 @@ namespace DisplayControl.Windows.Services
                 {
                     sInfo.ActiveTarget = (p.targetInfo.adapterId, p.targetInfo.id);
                     tInfo.ActiveSource = (p.sourceInfo.adapterId, p.sourceInfo.id);
-                }
-            }
-
-
-            foreach (var t in _targetsByKey.Values)
-            {
-                var adv = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
-                {
-                    header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
-                    {
-                        type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_TARGET_ADVANCED_COLOR_INFO,
-                        size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>(),
-                        adapterId = t.AdapterId,
-                        id = t.TargetId
-                    }
-                };
-                int rc = User32DisplayConfig.DisplayConfigGetDeviceInfo(ref adv);
-                if (rc == 0)
-                {
-                    t.HdrSupported = adv.advancedColorSupported;
-                    t.HdrEnabled = adv.advancedColorEnabled;
-                    t.ColorEncoding = adv.colorEncoding.ToString();
-                    t.BitsPerColor = (int)adv.bitsPerColorChannel;
-                }
-            }
-
-
-            foreach (var t in _targetsByKey.Values.Where(x => x.Active && x.ActiveSource.HasValue))
-            {
-                string sKey = SKey(t.ActiveSource!.Value.adapter, t.ActiveSource!.Value.sourceId);
-                if (_sourcesByKey.TryGetValue(sKey, out var s) && !string.IsNullOrWhiteSpace(s.GdiName))
-                {
-                    try
-                    {
-                        var dm = new DEVMODE();
-                        dm.dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODE>();
-                        if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, 0))
-                        {
-                            if (!t.BitsPerColor.HasValue && dm.dmBitsPerPel > 0)
-                            {
-                                int bpp = (int)dm.dmBitsPerPel;
-                                t.BitsPerColor = bpp == 30 ? 10 : bpp == 36 ? 12 : bpp >= 24 ? 8 : (int?)null;
-                            }
-                            if (!t.HdrEnabled.HasValue || t.HdrEnabled == false)
-                            {
-                                if (t.BitsPerColor.HasValue && t.BitsPerColor.Value >= 10)
-                                {
-                                    t.HdrEnabled = true;
-                                    t.HdrSupported ??= true;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
                 }
             }
         }
@@ -313,8 +210,11 @@ namespace DisplayControl.Windows.Services
                     return Result.Ok("The monitor is already active");
             }
 
-            var allCandidates = _targetsByKey.Values
-                .Where(t => t.Available && !t.Active).ToList();
+            var allCandidates = _targetsByKey.Values.Where(t => t.Available && !t.Active).ToList();
+            if (allCandidates.Count == 0)
+            {
+                return Result.Fail("No monitors available; check connection and power.");
+            }
 
             var candidates = _targetsByKey.Values
                 .Where(t => t.Available && !t.Active &&
@@ -325,10 +225,6 @@ namespace DisplayControl.Windows.Services
 
             if (candidates.Count == 0)
             {
-                if (allCandidates.Count == 0)
-                {
-                    return Result.Fail("No monitors available; check connection and power.");
-                }
                 var optsList = allCandidates.Select(t => t.Friendly ?? $"tgt:{t.TargetId}").ToList();
                 string opts = string.Join(", ", optsList);
                 return Result.Fail($"Could not find the specified monitor. Options: {opts}", optsList);
@@ -360,12 +256,12 @@ namespace DisplayControl.Windows.Services
         private bool SetMonitor(int sourceid, int targetid)
         {
             if (User32DisplayConfig.GetDisplayConfigBufferSizes(QDC.ALL_PATHS, out uint pathCount, out uint modeCount) != 0)
-                throw new Exception("Error getting buffer sizes");
+                throw new DisplayControlException("Error getting buffer sizes");
 
             var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
             var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
             if (User32DisplayConfig.QueryDisplayConfig(QDC.ALL_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
-                throw new Exception("Error getting current display configuration");
+                throw new DisplayControlException("Error getting current display configuration");
 
             for (int i = 0; i < pathCount; i++)
             {
@@ -459,13 +355,8 @@ namespace DisplayControl.Windows.Services
                         t.Active && t.ActiveSource.HasValue &&
                         _sourcesByKey.TryGetValue(SKey(t.ActiveSource.Value.adapter, t.ActiveSource.Value.sourceId), out var ts) &&
                         ts.HasMode && ts.PosX == 0 && ts.PosY == 0);
-                    if (primariosEnCero > 1)
+                    if (primariosEnCero == 1)
                     {
-
-                    }
-                    else
-                    {
-
                         var activeOpts = _targetsByKey.Values
                             .Where(t => t.Active)
                             .Select(t => t.Friendly ?? $"tgt:{t.TargetId}")
@@ -687,12 +578,82 @@ namespace DisplayControl.Windows.Services
             return Result.Ok("Profile applied");
         }
 
-        /// <summary>Applies a full display profile including primary, geometry and refresh.</summary>
+        /// <summary>Applies a full display profile including primary, geometry and refresh with rollback + confirmation.</summary>
         public Result SetMonitors(DesiredProfile profile)
         {
             if (profile == null || profile.Monitors == null || profile.Monitors.Count == 0)
                 return Result.Fail("Empty or null profile");
 
+            // Capture current layout to enable rollback on failure or if user does not confirm.
+            var snapshot = CreateSnapshotProfile();
+
+            // Apply the requested profile.
+            var apply = ApplyFullProfile(profile);
+            if (!apply.Success)
+            {
+                var rb = ApplyFullProfile(snapshot);
+                if (rb.Success)
+                {
+                    return Result.Fail("Failed to apply profile; previous layout restored");
+                }
+                else
+                {
+                    FallbackEnsurePrimary(snapshot.PrimaryName);
+                    return Result.Fail("Failed to apply profile; applied safety fallback (could not restore full layout)");
+                }
+            }
+
+            // Ask for confirmation with a top-most dialog; revert on timeout or cancel.
+            bool keep = PromptKeepChangesWithTimeout(
+                title: "DisplayControl — Keep display changes?",
+                message: "Keep these display settings?\nChanges will revert automatically in 15 seconds.",
+                timeoutSeconds: 15);
+
+            if (keep)
+                return Result.Ok($"Profile '{profile.Name ?? "(unnamed)"}' applied and confirmed");
+
+            var revert = ApplyFullProfile(snapshot);
+            if (!revert.Success)
+            {
+                FallbackEnsurePrimary(snapshot.PrimaryName);
+                return Result.Fail("Changes reverted using safety fallback (could not restore full layout)");
+            }
+
+            return Result.Ok("Changes reverted");
+        }
+
+        /// <summary>
+        /// Builds an in-memory DesiredProfile snapshot of the current layout.
+        /// </summary>
+        private DesiredProfile CreateSnapshotProfile()
+        {
+            var current = List();
+            string? primary = current.FirstOrDefault(c => c.IsActive && c.IsPrimary)?.FriendlyName;
+            var monitors = new List<DesiredMonitorConfig>(current.Count);
+            foreach (var d in current)
+            {
+                if (string.IsNullOrWhiteSpace(d.FriendlyName)) continue;
+                var a = d.Active;
+                monitors.Add(new DesiredMonitorConfig(
+                    d.FriendlyName!,
+                    d.IsActive,
+                    a?.PositionX ?? 0,
+                    a?.PositionY ?? 0,
+                    a?.Width ?? 0,
+                    a?.Height ?? 0,
+                    a?.RefreshHz ?? 0.0,
+                    a?.Orientation,
+                    null
+                ));
+            }
+            return new DesiredProfile("snapshot", primary, monitors);
+        }
+
+        /// <summary>
+        /// Applies a full profile (enable/disable, set primary, geometry, refresh). Does not prompt.
+        /// </summary>
+        private Result ApplyFullProfile(DesiredProfile profile)
+        {
             var current = List();
             var available = new HashSet<string>(current.Select(c => c.FriendlyName).Where(n => !string.IsNullOrWhiteSpace(n))!.Cast<string>(), StringComparer.OrdinalIgnoreCase);
             var missing = profile.Monitors.Select(m => m.Name).Where(n => !available.Contains(n)).ToList();
@@ -714,7 +675,66 @@ namespace DisplayControl.Windows.Services
             var r3 = ApplyDisplaySettings(profile);
             if (!r3.Success) return r3;
 
-            return Result.Ok($"Profile '{profile.Name ?? "(unnamed)"}' applied");
+            return Result.Ok();
+        }
+
+        /// <summary>
+        /// Best-effort fallback: enable and set as primary the provided monitor name.
+        /// </summary>
+        private void FallbackEnsurePrimary(string? primaryName)
+        {
+            if (string.IsNullOrWhiteSpace(primaryName)) return;
+            try { _ = EnableMonitor(primaryName!); } catch { }
+            try { _ = SetPrimary(primaryName!); } catch { }
+        }
+
+        /// <summary>
+        /// Shows a top-most confirmation dialog and waits up to the specified timeout.
+        /// Returns true to keep changes; false to revert (cancel or timeout).
+        /// </summary>
+        private bool PromptKeepChangesWithTimeout(string title, string message, int timeoutSeconds)
+        {
+            using var done = new ManualResetEvent(false);
+            bool? keep = null;
+            string caption = title;
+
+            Thread t = new Thread(() =>
+            {
+                try
+                {
+                    int res = Interop.User32.User32Dialogs.MessageBoxTopMost(IntPtr.Zero, message, caption,
+                        Interop.User32.User32Dialogs.MB_YESNO | Interop.User32.User32Dialogs.MB_ICONQUESTION | Interop.User32.User32Dialogs.MB_SETFOREGROUND);
+                    keep = (res == Interop.User32.User32Dialogs.IDYES);
+                }
+                catch
+                {
+                    keep = false;
+                }
+                finally
+                {
+                    done.Set();
+                }
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+
+            if (!done.WaitOne(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds))))
+            {
+                // Timeout: attempt to close the message box window and revert.
+                try
+                {
+                    var hWnd = Interop.User32.User32Dialogs.FindWindowByCaption(caption);
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        Interop.User32.User32Dialogs.PostClose(hWnd);
+                    }
+                }
+                catch { }
+                return false;
+            }
+
+            return keep ?? false;
         }
 
         private static uint MapOrientationToDm(string? orientation)
@@ -800,7 +820,7 @@ namespace DisplayControl.Windows.Services
             return null;
         }
 
-        /// <summary>Saves the current layout as a profile JSON file under the local profiles directory.</summary>
+        /// <summary>Saves the current layout as a profile JSON file under the user's .ewDisplayControl directory.</summary>
         public Result SaveProfile(string? name = null)
         {
             var current = List();
@@ -819,9 +839,9 @@ namespace DisplayControl.Windows.Services
                     a?.PositionY ?? 0,
                     a?.Width ?? 0,
                     a?.Height ?? 0,
-                    a?.ActiveRefreshHz ?? 0.0,
+                    a?.RefreshHz ?? 0.0,
                     a?.Orientation,
-                    a?.TextScalePercent
+                    null
                 ));
             }
 
@@ -829,7 +849,8 @@ namespace DisplayControl.Windows.Services
 
             try
             {
-                string dir = Path.Combine(Environment.CurrentDirectory, "profiles");
+                string userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string dir = Path.Combine(userDir, ".ewDisplayControl");
                 Directory.CreateDirectory(dir);
                 string path = Path.Combine(dir, (name ?? "current") + ".json");
                 var json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
@@ -846,7 +867,6 @@ namespace DisplayControl.Windows.Services
         public IReadOnlyList<DisplayInfo> List()
         {
             FillData();
-            var textScale = GetTextScaleByGdiName();
             var result = new List<DisplayInfo>(_targetsByKey.Count);
             foreach (var t in _targetsByKey.Values.Where(t => t.Available))
             {
@@ -856,10 +876,7 @@ namespace DisplayControl.Windows.Services
                     if (_sourcesByKey.TryGetValue(sk, out var s))
                     {
                         bool isPrimary = s.HasMode && s.PosX == 0 && s.PosY == 0;
-                        int? txtScale = null;
-                        if (!string.IsNullOrWhiteSpace(s.GdiName) && textScale.TryGetValue(s.GdiName!, out var p)) txtScale = p;
                         int? devmodeHz = null;
-                        int? bpp = null;
                         string? orientationStr = t.HasTransform ? t.Rotation.ToString() : null;
                         if (!string.IsNullOrWhiteSpace(s.GdiName))
                         {
@@ -870,7 +887,6 @@ namespace DisplayControl.Windows.Services
                                 if (User32DisplaySettings.EnumDisplaySettingsEx(s.GdiName!, User32DisplaySettings.ENUM_CURRENT_SETTINGS, ref dm, User32DisplaySettings.EDS_ROTATEDMODE))
                                 {
                                     if (dm.dmDisplayFrequency > 0) devmodeHz = (int)dm.dmDisplayFrequency;
-                                    if (dm.dmBitsPerPel > 0) bpp = (int)dm.dmBitsPerPel;
                                     orientationStr = dm.dmDisplayOrientation switch
                                     {
                                         1 => "Rotate90",
@@ -887,12 +903,6 @@ namespace DisplayControl.Windows.Services
                         if (devmodeHz.HasValue && devmodeHz.Value > 0)
                             activeHzOut = devmodeHz.Value;
 
-                        int? bitsPerColor = t.BitsPerColor;
-                        if (!bitsPerColor.HasValue && bpp.HasValue)
-                        {
-                            bitsPerColor = bpp.Value == 30 ? 10 : bpp.Value == 36 ? 12 : bpp.Value >= 24 ? 8 : (int?)null;
-                        }
-
                         var active = new ActiveDetails(
                             s.GdiName,
                             s.PosX,
@@ -900,23 +910,13 @@ namespace DisplayControl.Windows.Services
                             s.Width,
                             s.Height,
                             activeHzOut,
-                            orientationStr,
-                            t.HasTransform ? t.Scaling.ToString() : null,
-                            txtScale,
-                            activeHzOut,
-                            t.DesktopRefreshHz,
-                            0.0,
-                            t.HdrSupported,
-                            t.HdrEnabled,
-                            t.ColorEncoding,
-                            bitsPerColor,
-                            null
+                            orientationStr
                         );
-                        result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active));
+                        result.Add(new DisplayInfo(t.Friendly, true, isPrimary, active, t.TargetId));
                         continue;
                     }
                 }
-                result.Add(new DisplayInfo(t.Friendly, false, false, null));
+                result.Add(new DisplayInfo(t.Friendly, false, false, null, t.TargetId));
             }
             return result;
         }

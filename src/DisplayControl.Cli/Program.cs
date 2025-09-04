@@ -125,8 +125,13 @@ namespace DisplayControl.Cli
             if (found && profile != null)
             {
                 var res = dc.SetMonitors(profile);
-                Console.WriteLine(res.Success ? $"Profile '{profileName}' applied." : $"FAIL: {res.Message}");
-                return res.Success ? 0 : 1;
+                if (res.Success)
+                {
+                    Console.WriteLine(res.Message ?? $"Profile '{profileName}' applied.");
+                    return 0;
+                }
+                Console.WriteLine($"FAIL: {res.Message}");
+                return 1;
             }
             return 0;
         }
